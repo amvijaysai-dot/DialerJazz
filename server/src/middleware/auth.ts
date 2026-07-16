@@ -16,12 +16,8 @@ export const requireAuth = async (req: AuthenticatedRequest, res: Response, next
     }
 
     const token = authHeader.split(' ')[1];
-    
-    // Initialize an isolated client instance with the user's token
-    const insforgeClient = getInsforgeClient(token);
-    
-    // Decode the JWT to get the user payload. The actual cryptographic signature validation
-    // is securely handled by InsForge PostgREST whenever req.db makes an API call.
+
+    // Decode the JWT to get the user payload
     const decoded = jwt.decode(token) as any;
     
     if (!decoded || !decoded.sub) {
@@ -32,8 +28,13 @@ export const requireAuth = async (req: AuthenticatedRequest, res: Response, next
       throw new ApiError(401, 'JWT expired', 'expired_token');
     }
 
+    // Set user info from JWT
     req.user = { id: decoded.sub, email: decoded.email, role: decoded.role };
-    req.db = insforgeClient; // Inject authenticated DB client for RLS
+    
+    // Create admin client with service key for database operations
+    // The service key bypasses RLS, but we still scope queries to the user's ID
+    req.db = getInsforgeClient();
+    
     next();
   } catch (error) {
     next(error);

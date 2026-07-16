@@ -10,6 +10,12 @@ export class ApiError extends Error {
 
 export const errorHandler = (error: unknown, req: Request, res: Response, next: NextFunction) => {
   if (error instanceof ApiError) {
+    console.error('[ApiError]', {
+      statusCode: error.statusCode,
+      code: error.code,
+      message: error.message,
+      stack: error.stack,
+    });
     return res.status(error.statusCode).json({
       error: { code: error.code, message: error.message },
     });
@@ -29,8 +35,19 @@ export const errorHandler = (error: unknown, req: Request, res: Response, next: 
     });
   }
 
-  console.error('[Unhandled Server Error]', error);
+  // Log full stack trace for unhandled errors
+  console.error('[Unhandled Server Error]', {
+    error: error,
+    message: (error as any)?.message,
+    stack: (error as any)?.stack,
+    request: {
+      method: req.method,
+      url: req.url,
+      body: req.body,
+    },
+  });
+  const detail = (error as any)?.message || JSON.stringify(error) || 'An unexpected internal error occurred';
   return res.status(500).json({
-    error: { code: 'server_error', message: 'An unexpected internal error occurred' },
+    error: { code: 'server_error', message: detail },
   });
 };

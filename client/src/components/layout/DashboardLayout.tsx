@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import IncomingCallOverlay from '@/components/IncomingCallOverlay';
 import HeldCallBubble from '@/components/HeldCallBubble';
@@ -18,28 +18,36 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // Initialize voice connection once on layout mount
-  const { connectProvider, connectionStatus, primaryCall, activeProvider } = useVoice();
+  const { connectProvider, connectionStatus, activeProvider, primaryCall } = useVoice();
+
+  // Only auto-connect a default provider ONCE on first mount. A child page
+  // (e.g. the campaign dialer) may later switch to the campaign's own provider
+  // (Twilio) — this effect must never re-run and clobber that selection.
+  const didAutoConnect = useRef(false);
 
   useEffect(() => {
+    if (didAutoConnect.current) return;
+    didAutoConnect.current = true;
+
     let mounted = true;
-    
+
     async function initTelephony() {
       if (connectionStatus === 'disconnected' && !activeProvider) {
         try {
           const { data } = await settingsApi.get();
-          if (mounted) {
+          if (mounted && !activeProvider) {
              const defaultProv = data?.default_provider || 'telnyx';
              connectProvider(defaultProv);
           }
         } catch (e) {
-          if (mounted) connectProvider('telnyx'); // fallback
+          if (mounted && !activeProvider) connectProvider('telnyx'); // fallback
         }
       }
     }
-    
+
     initTelephony();
     return () => { mounted = false; };
-  }, [connectProvider, connectionStatus, activeProvider]);
+  }, []);
 
   return (
     <div className="h-screen bg-white dark:bg-[#0F0F12] flex overflow-hidden text-foreground">

@@ -123,7 +123,16 @@ export interface Campaign {
 }
 
 export const statsApi = {
-  getDashboard: () => apiFetch<{ totalCampaigns: number; totalLeads: number; totalCallsMade: number }>('/stats/dashboard'),
+  getDashboard: () => apiFetch<{
+    totalCampaigns: number;
+    totalLeads: number;
+    totalCallsMade: number;
+    totalMeetingsBooked: number;
+    totalCallbacks: number;
+    totalInterested: number;
+    totalNotInterested: number;
+    totalDoNotCall: number;
+  }>('/stats/dashboard'),
 };
 
 export const campaignsApi = {

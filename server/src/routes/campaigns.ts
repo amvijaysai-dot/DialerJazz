@@ -2,6 +2,7 @@ import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { ApiError } from '../middleware/errorHandler.js';
+import { getDbPool } from '../lib/db.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -64,46 +65,50 @@ router.get('/:id', async (req: AuthenticatedRequest, res: Response, next: NextFu
   }
 });
 
-router.post('/', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  try {
-    const body = createCampaignSchema.parse(req.body);
+  router.post('/', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const body = createCampaignSchema.parse(req.body);
+      const pool = getDbPool();
 
-    const { data, error } = await req.db!
-      .database.from('campaigns')
-      .insert({
-        user_id: req.user.id,
-        name: body.name,
-        dialer_mode: body.dialer_mode,
-        provider: body.provider,
-        caller_number: body.caller_number || null,
-        status: 'draft',
-      })
-      .select()
-      .single();
+      const { rows } = await pool.query(
+        `INSERT INTO public.campaigns (user_id, name, dialer_mode, provider, caller_number, status)
+         VALUES ($1, $2, $3, $4, $5, 'draft')
+         RETURNING *`,
+        [
+          req.user.id,
+          body.name,
+          body.dialer_mode,
+          body.provider,
+          body.caller_number || null,
+        ]
+      );
 
-    if (error) throw new ApiError(500, error.message, 'db_error');
+      if (!rows.length) {
+        throw new ApiError(500, 'Failed to create campaign', 'db_error');
+      }
 
-    res.status(201).json({ data });
-  } catch (error) {
-    next(error);
-  }
-});
+      res.status(201).json({ data: rows[0] });
+    } catch (error) {
+      next(error);
+    }
+  });
 
 router.patch('/:id/status', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const statusSchema = z.object({ status: z.enum(['draft', 'scheduled', 'active', 'paused', 'completed', 'archived']) });
     const { status } = statusSchema.parse(req.body);
+    const pool = getDbPool();
 
-    const { data, error } = await req.db!
-      .database.from('campaigns')
-      .update({ status, updated_at: new Date().toISOString() })
-      .eq('id', req.params.id)
-      .eq('user_id', req.user.id)
-      .select()
-      .single();
+    const { rows } = await pool.query(
+      `UPDATE public.campaigns
+       SET status = $1, updated_at = now()
+       WHERE id = $2 AND user_id = $3
+       RETURNING *`,
+      [status, req.params.id, req.user.id]
+    );
 
-    if (error) throw new ApiError(500, error.message, 'db_error');
-    res.json({ data });
+    if (!rows.length) throw new ApiError(404, 'Campaign not found', 'not_found');
+    res.json({ data: rows[0] });
   } catch (error) {
     next(error);
   }
@@ -117,33 +122,37 @@ router.patch('/:id/config', async (req: AuthenticatedRequest, res: Response, nex
       caller_number: z.string().optional().nullable(),
     });
     const updates = configSchema.parse(req.body);
+    const pool = getDbPool();
 
     // Fetch current status to enforce the lock
-    const { data: campaign, error: fetchError } = await req.db!
-      .database.from('campaigns')
-      .select('status')
-      .eq('id', req.params.id)
-      .eq('user_id', req.user.id)
-      .single();
+    const { rows: existing } = await pool.query(
+      `SELECT status FROM public.campaigns WHERE id = $1 AND user_id = $2`,
+      [req.params.id, req.user.id]
+    );
 
-    if (fetchError || !campaign) {
+    if (!existing.length) {
       throw new ApiError(404, 'Campaign not found', 'not_found');
     }
 
-    if (campaign.status !== 'draft') {
+    if (existing[0].status !== 'draft') {
       throw new ApiError(400, 'Cannot modify campaign configuration after it has been launched (status is not draft)', 'bad_request');
     }
 
-    const { data, error } = await req.db!
-      .database.from('campaigns')
-      .update({ ...updates, updated_at: new Date().toISOString() })
-      .eq('id', req.params.id)
-      .eq('user_id', req.user.id)
-      .select()
-      .single();
+    const setClauses: string[] = ['updated_at = now()'];
+    const values: any[] = [];
+    // WHERE clause uses $1 (id) and $2 (user_id), so SET fields start at $3.
+    let idx = 2;
+    if (updates.dialer_mode !== undefined) { setClauses.push(`dialer_mode = $${++idx}`); values.push(updates.dialer_mode); }
+    if (updates.provider !== undefined) { setClauses.push(`provider = $${++idx}`); values.push(updates.provider); }
+    if (updates.caller_number !== undefined) { setClauses.push(`caller_number = $${++idx}`); values.push(updates.caller_number); }
 
-    if (error) throw new ApiError(500, error.message, 'db_error');
-    res.json({ data });
+    const { rows } = await pool.query(
+      `UPDATE public.campaigns SET ${setClauses.join(', ')} WHERE id = $1 AND user_id = $2 RETURNING *`,
+      [req.params.id, req.user.id, ...values]
+    );
+
+    if (!rows.length) throw new ApiError(404, 'Campaign not found', 'not_found');
+    res.json({ data: rows[0] });
   } catch (error) {
     next(error);
   }
@@ -153,17 +162,15 @@ router.patch('/:id/rename', async (req: AuthenticatedRequest, res: Response, nex
   try {
     const renameSchema = z.object({ name: z.string().min(1).max(100) });
     const { name } = renameSchema.parse(req.body);
+    const pool = getDbPool();
 
-    const { data, error } = await req.db!
-      .database.from('campaigns')
-      .update({ name, updated_at: new Date().toISOString() })
-      .eq('id', req.params.id)
-      .eq('user_id', req.user.id)
-      .select()
-      .single();
+    const { rows } = await pool.query(
+      `UPDATE public.campaigns SET name = $1, updated_at = now() WHERE id = $2 AND user_id = $3 RETURNING *`,
+      [name, req.params.id, req.user.id]
+    );
 
-    if (error) throw new ApiError(500, error.message, 'db_error');
-    res.json({ data });
+    if (!rows.length) throw new ApiError(404, 'Campaign not found', 'not_found');
+    res.json({ data: rows[0] });
   } catch (error) {
     next(error);
   }
@@ -171,14 +178,13 @@ router.patch('/:id/rename', async (req: AuthenticatedRequest, res: Response, nex
 
 router.delete('/:id', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    // Delete the campaign (Supabase cascade deletes leads if configured, otherwise we just delete campaign)
-    const { error } = await req.db!
-      .database.from('campaigns')
-      .delete()
-      .eq('id', req.params.id)
-      .eq('user_id', req.user.id);
+    const pool = getDbPool();
+    const { rowCount } = await pool.query(
+      `DELETE FROM public.campaigns WHERE id = $1 AND user_id = $2`,
+      [req.params.id, req.user.id]
+    );
 
-    if (error) throw new ApiError(500, error.message, 'db_error');
+    if (!rowCount) throw new ApiError(404, 'Campaign not found', 'not_found');
     res.status(204).send();
   } catch (error) {
     next(error);

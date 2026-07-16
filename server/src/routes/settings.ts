@@ -2,6 +2,7 @@ import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { ApiError } from '../middleware/errorHandler.js';
+import { getDbPool } from '../lib/db.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -42,6 +43,7 @@ router.get('/', async (req: AuthenticatedRequest, res: Response, next: NextFunct
 router.put('/', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const body = updateSettingsSchema.parse(req.body);
+    const pool = getDbPool();
 
     const updatePayload: Record<string, unknown> = {
       user_id: req.user.id,
@@ -61,15 +63,21 @@ router.put('/', async (req: AuthenticatedRequest, res: Response, next: NextFunct
     // General
     if (body.default_provider !== undefined) updatePayload.default_provider = body.default_provider;
 
-    const { data, error } = await req.db!
-      .database.from('user_settings')
-      .upsert(updatePayload, { onConflict: 'user_id' })
-      .select('telnyx_api_key, telnyx_sip_login, telnyx_sip_password, telnyx_caller_number, twilio_account_sid, twilio_auth_token, twilio_api_key, twilio_api_secret, twilio_twiml_app_sid, twilio_caller_number, default_provider, updated_at')
-      .single();
+    const columns = Object.keys(updatePayload);
+    const placeholders = columns.map((_, i) => `$${i + 1}`);
+    const values = columns.map((c) => updatePayload[c]);
+    const updateCols = columns.filter((c) => c !== 'user_id');
+    const updateClause = updateCols.map((c) => `${c} = EXCLUDED.${c}`).join(', ');
 
-    if (error) throw new ApiError(500, error.message, 'db_error');
+    const { rows } = await pool.query(
+      `INSERT INTO public.user_settings (${columns.join(', ')})
+       VALUES (${placeholders.join(', ')})
+       ON CONFLICT (user_id) DO UPDATE SET ${updateClause}
+       RETURNING telnyx_api_key, telnyx_sip_login, telnyx_sip_password, telnyx_caller_number, twilio_account_sid, twilio_auth_token, twilio_api_key, twilio_api_secret, twilio_twiml_app_sid, twilio_caller_number, default_provider, updated_at`,
+      values
+    );
 
-    res.json({ data });
+    res.json({ data: rows[0] });
   } catch (error) {
     next(error);
   }
@@ -92,15 +100,13 @@ router.post('/verify-telnyx', async (req: AuthenticatedRequest, res: Response, n
     }
 
     // Save to user_settings if valid
-    const { error } = await req.db!
-      .database.from('user_settings')
-      .upsert({
-        user_id: req.user.id,
-        telnyx_api_key: apiKey,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'user_id' });
-
-    if (error) throw new ApiError(500, error.message, 'db_error');
+    const pool = getDbPool();
+    await pool.query(
+      `INSERT INTO public.user_settings (user_id, telnyx_api_key, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (user_id) DO UPDATE SET telnyx_api_key = EXCLUDED.telnyx_api_key, updated_at = now()`,
+      [req.user.id, apiKey]
+    );
 
     res.json({ data: { success: true, message: 'Telnyx Key Validated and Saved' } });
   } catch (error) {
@@ -128,16 +134,13 @@ router.post('/verify-twilio', async (req: AuthenticatedRequest, res: Response, n
     }
 
     // Save to user_settings
-    const { error } = await req.db!
-      .database.from('user_settings')
-      .upsert({
-        user_id: req.user.id,
-        twilio_account_sid: accountSid,
-        twilio_auth_token: authToken,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' });
-
-    if (error) throw new ApiError(500, error.message, 'db_error');
+    const pool = getDbPool();
+    await pool.query(
+      `INSERT INTO public.user_settings (user_id, twilio_account_sid, twilio_auth_token, updated_at)
+       VALUES ($1, $2, $3, now())
+       ON CONFLICT (user_id) DO UPDATE SET twilio_account_sid = EXCLUDED.twilio_account_sid, twilio_auth_token = EXCLUDED.twilio_auth_token, updated_at = now()`,
+      [req.user.id, accountSid, authToken]
+    );
 
     res.json({ data: { success: true, message: 'Twilio Credentials Validated and Saved' } });
   } catch (error) {

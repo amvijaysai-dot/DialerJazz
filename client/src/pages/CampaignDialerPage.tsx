@@ -33,11 +33,12 @@ import InCallHUD from '@/components/InCallHUD';
 import DispositionOverlay from '@/components/DispositionOverlay';
 
 type DialerMode = 'power' | 'click';
-type Disposition = 'answered' | 'follow_up' | 'not_interested' | 'no_answer' | 'voicemail' | 'busy' | 'dnc';
+type Disposition = 'meeting_booked' | 'answered' | 'callback' | 'not_interested' | 'no_answer' | 'voicemail' | 'busy' | 'dnc';
 
 const DISPOSITIONS: { value: Disposition; label: string; color: string; emoji: string; primary?: boolean }[] = [
+  { value: 'meeting_booked', label: 'Meeting Booked', color: 'bg-foreground text-background', emoji: '📅', primary: true },
   { value: 'answered',       label: 'Interested',     color: 'bg-foreground text-background', emoji: '🔥', primary: true },
-  { value: 'follow_up',      label: 'Follow-up',      color: 'bg-foreground text-background', emoji: '🤝', primary: true },
+  { value: 'callback',       label: 'Callback',       color: 'bg-foreground text-background', emoji: '🤝', primary: true },
   { value: 'not_interested',label: 'Not Interested', color: 'bg-muted text-foreground',   emoji: '❄️', primary: true },
   { value: 'no_answer',      label: 'No Answer',      color: 'bg-muted text-foreground', emoji: '📵' },
   { value: 'voicemail',      label: 'Voicemail',       color: 'bg-muted text-foreground',emoji: '📩' },
@@ -65,6 +66,13 @@ export default function CampaignDialerPage() {
   const [showDTMF, setShowDTMF] = useState(false);
   const [notes, setNotes] = useState('');
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
+
+  // ── Power Dialer state ───────────────────────────────────────────────
+  const [isPowerRunning, setIsPowerRunning] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [powerDelay, setPowerDelay] = useState(3); // seconds between calls
+  const powerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Voice (from unified context — delegates to Telnyx or Twilio)
   const voice = useVoice();
   const prevCallState = useRef<CallState>('idle');
@@ -174,60 +182,6 @@ export default function CampaignDialerPage() {
     voice.hangup();
   };
 
-  const handleDisposition = async (dispositionLabel: string) => {
-    if (!currentLead) return;
-    setIsDisposing(true);
-
-    try {
-      const dispValue = DISPOSITIONS.find(d => d.label === dispositionLabel)?.value || 'answered';
-      
-      // Get call duration - ensure it's a valid number
-      const callDuration = typeof voice.primaryCallDuration === 'number' ? voice.primaryCallDuration : 0;
-      console.log('[CampaignDialer] Saving call - duration:', callDuration, 'disposition:', dispValue);
-      
-      // Log the full call event, duration, and disposition to our new calls API
-      await callsApi.log({
-        lead_id: currentLead.id,
-        campaign_id: campaign?.id || '',
-        duration_seconds: callDuration,
-        status: 'completed',
-        disposition: dispValue,
-        notes: notes,
-        provider: campaign?.provider || 'telnyx',
-      });
-      
-      // Update lead status so it won't appear on refresh
-      await leadsApi.updateDisposition(currentLead.id, dispValue);
-      
-      toast.success(`Marked as ${dispositionLabel}`);
-      setShowDisposition(false);
-
-      if (dialerSessionMode === 'power') {
-        // Auto-swipe in 1.5 seconds if power dialer
-        setTimeout(() => {
-           triggerSwipeLeft();
-        }, 1500);
-      }
-      // If click-to-call, we do nothing and wait for manual swipe!
-
-    } catch (err: unknown) {
-      toast.error('Failed to save disposition');
-    } finally {
-      setIsDisposing(false);
-    }
-  };
-
-  const markMeetingBooked = async () => {
-    if (!currentLead) return;
-    try {
-      await leadsApi.updateDisposition(currentLead.id, 'answered');
-      toast.success('🎉 Meeting Booked & Saved!');
-      triggerSwipeLeft();
-    } catch(e) {
-      toast.error('Failed to book meeting');
-    }
-  }
-
   const navigateNext = () => {
     if (currentIndex + 1 < leads.length) {
       const newIndex = currentIndex + 1;
@@ -250,9 +204,146 @@ export default function CampaignDialerPage() {
     }
   }
 
+  // ── Power Dialer: schedule the next call after a delay ────────────────
+  const scheduleNextPowerCall = useCallback(() => {
+    if (powerTimerRef.current) clearTimeout(powerTimerRef.current);
+    if (!isPowerRunning || isPaused) return;
+    // Stop if we're on the last lead
+    if (currentIndex + 1 >= leads.length) {
+      setIsPowerRunning(false);
+      toast.info('All leads dialed!');
+      return;
+    }
+    powerTimerRef.current = setTimeout(() => {
+      if (!isPaused) {
+        navigateNext();
+        // Auto-dial the new lead if still running and not in a call
+        if (dialerSessionMode === 'power' && !isPaused) {
+          setTimeout(() => {
+            if (isPowerRunning && !isPaused && !['trying', 'ringing', 'active'].includes(voice.primaryCallState)) {
+              handleDial();
+            }
+          }, 300);
+        }
+      }
+    }, powerDelay * 1000);
+  }, [isPowerRunning, isPaused, currentIndex, leads.length, powerDelay, dialerSessionMode, voice.primaryCallState, navigateNext, handleDial]);
+
+  // Clear timer on unmount
+  useEffect(() => {
+    return () => {
+      if (powerTimerRef.current) clearTimeout(powerTimerRef.current);
+    };
+  }, []);
+
+  const startPowerDialer = () => {
+    setIsPowerRunning(true);
+    setIsPaused(false);
+    toast.success('Power Dialer started');
+    // Dial the current lead immediately
+    if (!['trying', 'ringing', 'active'].includes(voice.primaryCallState)) {
+      handleDial();
+    }
+  };
+
+  const pausePowerDialer = () => {
+    setIsPaused(true);
+    if (powerTimerRef.current) clearTimeout(powerTimerRef.current);
+    toast('Power Dialer paused');
+  };
+
+  const resumePowerDialer = () => {
+    setIsPaused(false);
+    toast('Power Dialer resumed');
+    scheduleNextPowerCall();
+  };
+
+  const stopPowerDialer = () => {
+    setIsPowerRunning(false);
+    setIsPaused(false);
+    if (powerTimerRef.current) clearTimeout(powerTimerRef.current);
+    toast('Power Dialer stopped');
+  };
+
+  const skipPowerLead = () => {
+    if (powerTimerRef.current) clearTimeout(powerTimerRef.current);
+    navigateNext();
+    if (isPowerRunning && !isPaused) scheduleNextPowerCall();
+  };
+
+  const handleDisposition = async (
+    dispositionLabel: string,
+    callbackDetails?: { date: string; time: string; notes: string }
+  ) => {
+    if (!currentLead) return;
+    setIsDisposing(true);
+
+    try {
+      const dispValue = DISPOSITIONS.find(d => d.label === dispositionLabel)?.value || 'answered';
+
+      // Build notes — append callback schedule when applicable
+      let finalNotes = notes;
+      if (dispValue === 'callback' && callbackDetails) {
+        const parts = [];
+        if (callbackDetails.date) parts.push(`Callback: ${callbackDetails.date}`);
+        if (callbackDetails.time) parts.push(`at ${callbackDetails.time}`);
+        if (callbackDetails.notes) parts.push(callbackDetails.notes);
+        const cbLine = parts.join(' ');
+        finalNotes = [notes, cbLine].filter(Boolean).join('\n');
+      }
+
+      // Get call duration - ensure it's a valid number
+      const callDuration = typeof voice.primaryCallDuration === 'number' ? voice.primaryCallDuration : 0;
+      console.log('[CampaignDialer] Saving call - duration:', callDuration, 'disposition:', dispValue);
+
+      // Log the full call event, duration, and disposition to our new calls API
+      await callsApi.log({
+        lead_id: currentLead.id,
+        campaign_id: campaign?.id || '',
+        duration_seconds: callDuration,
+        status: 'completed',
+        disposition: dispValue,
+        notes: finalNotes,
+        provider: campaign?.provider || 'telnyx',
+      });
+
+      // Update lead status so it won't appear on refresh
+      await leadsApi.updateDisposition(currentLead.id, dispValue);
+
+      toast.success(`Marked as ${dispositionLabel}`);
+      setShowDisposition(false);
+
+      // Power Dialer: advance + schedule the next call after the configured delay
+      if (dialerSessionMode === 'power' && isPowerRunning && !isPaused) {
+        navigateNext();
+        scheduleNextPowerCall();
+      } else if (dialerSessionMode === 'power') {
+        // Power mode but not running: just advance (manual start)
+        navigateNext();
+      }
+      // If click/preview mode, wait for manual swipe.
+
+    } catch {
+      toast.error('Failed to save disposition');
+    } finally {
+      setIsDisposing(false);
+    }
+  };
+
+  const markMeetingBooked = async () => {
+    if (!currentLead) return;
+    try {
+      await leadsApi.updateDisposition(currentLead.id, 'answered');
+      toast.success('🎉 Meeting Booked & Saved!');
+      triggerSwipeLeft();
+    } catch {
+      toast.error('Failed to book meeting');
+    }
+  }
+
   // --- Framer Motion Swipe Physics ---
   const controls = useAnimation();
-  const handleDragEnd = async (_event: any, info: PanInfo) => {
+  const handleDragEnd = async (_event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     const swipeThreshold = 100; // px
     
     // Swipe Up: Book Meeting
@@ -348,9 +439,103 @@ export default function CampaignDialerPage() {
         </div>
       </header>
 
+      {/* Power Dialer control bar (only in power mode) */}
+      {dialerSessionMode === 'power' && (
+        <div className="flex items-center justify-center gap-2 px-6 pb-2 shrink-0 flex-wrap">
+          {!isPowerRunning ? (
+            <button
+              onClick={startPowerDialer}
+              className="flex items-center gap-2 bg-foreground text-background px-4 py-2 rounded-xl font-semibold text-sm hover:bg-foreground/90 transition-colors"
+            >
+              <Zap className="h-4 w-4" /> Start Power Dialer
+            </button>
+          ) : (
+            <>
+              {isPaused ? (
+                <button onClick={resumePowerDialer} className="flex items-center gap-2 bg-emerald-500 text-white px-4 py-2 rounded-xl font-semibold text-sm hover:bg-emerald-400 transition-colors">
+                  ▶ Resume
+                </button>
+              ) : (
+                <button onClick={pausePowerDialer} className="flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-xl font-semibold text-sm hover:bg-amber-400 transition-colors">
+                  ⏸ Pause
+                </button>
+              )}
+              <button onClick={skipPowerLead} className="flex items-center gap-2 bg-muted text-foreground px-4 py-2 rounded-xl font-semibold text-sm hover:bg-muted/80 transition-colors">
+                ⏭ Skip
+              </button>
+              <button onClick={stopPowerDialer} className="flex items-center gap-2 bg-red-500 text-white px-4 py-2 rounded-xl font-semibold text-sm hover:bg-red-400 transition-colors">
+                ⏹ Stop
+              </button>
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <span>Delay</span>
+                <select
+                  value={powerDelay}
+                  onChange={(e) => setPowerDelay(Number(e.target.value))}
+                  className="bg-muted border border-border rounded-lg px-2 py-1 text-foreground"
+                >
+                  <option value={1}>1s</option>
+                  <option value={2}>2s</option>
+                  <option value={3}>3s</option>
+                  <option value={5}>5s</option>
+                  <option value={10}>10s</option>
+                </select>
+              </div>
+              <span className="text-xs font-medium text-muted-foreground">
+                {isPaused ? 'Paused' : 'Running'} • {calledLeadsCount + currentIndex + 1}/{totalLeadsCount}
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Center - Swiping Deck Container */}
-      <main className="flex-1 relative flex items-center justify-center -mt-6">
+      <main className="flex-1 relative flex items-center justify-center -mt-6 gap-6">
         
+        {/* Permanent Lead Information panel (md+ screens) */}
+        {currentLead && (
+          <aside className="hidden md:flex w-80 shrink-0 flex-col gap-4 rounded-2xl border border-border bg-surface/60 p-5 overflow-y-auto no-scrollbar">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-muted-foreground font-semibold">Business Name</p>
+              <p className="text-lg font-semibold text-foreground mt-1">{currentLead.company || '—'}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-widest text-muted-foreground font-semibold">Owner Name</p>
+              <p className="text-base text-foreground mt-1">{currentLead.first_name} {currentLead.last_name || ''}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-widest text-muted-foreground font-semibold">Website</p>
+              {currentLead.website ? (
+                <a href={currentLead.website} target="_blank" rel="noreferrer" className="text-base text-blue-400 hover:underline break-all mt-1 block">{currentLead.website}</a>
+              ) : <p className="text-base text-foreground mt-1">—</p>}
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-widest text-muted-foreground font-semibold">Email</p>
+              {currentLead.email ? (
+                <a href={`mailto:${currentLead.email}`} className="text-base text-foreground hover:underline break-all mt-1 block">{currentLead.email}</a>
+              ) : <p className="text-base text-foreground mt-1">—</p>}
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-widest text-muted-foreground font-semibold">Phone</p>
+              <p className="text-base font-mono text-foreground mt-1">{currentLead.phone || '—'}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-widest text-muted-foreground font-semibold">Address</p>
+              <p className="text-base text-foreground mt-1">
+                {[currentLead.address, currentLead.city, currentLead.state, currentLead.zip].filter(Boolean).join(', ') || '—'}
+              </p>
+            </div>
+            <div className="flex-1 flex flex-col min-h-0">
+              <p className="text-xs uppercase tracking-widest text-muted-foreground font-semibold">Notes</p>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Notes auto-save with the call outcome..."
+                className="mt-1 w-full flex-1 min-h-[120px] bg-white/[0.02] border border-black/5 dark:border-white/5 rounded-xl resize-none p-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-foreground/20"
+              />
+            </div>
+          </aside>
+        )}
+
         {/* Background Hint layer */}
         <div className="absolute inset-0 flex items-center justify-between px-10 pointer-events-none opacity-20">
             <div className="flex flex-col items-center gap-2"><ArrowLeft className="h-10 w-10 text-foreground"/><span className="font-bold uppercase tracking-widest text-muted-foreground">Next</span></div>

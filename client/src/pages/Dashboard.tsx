@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone, Users, Clock, Plus, Wifi, WifiOff, Loader2, FolderOpen, Wallet, CreditCard } from 'lucide-react';
+import { Phone, Users, Plus, Wifi, WifiOff, Loader2, FolderOpen, Wallet, CalendarCheck, CalendarClock, ThumbsUp, ThumbsDown, Ban } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import CampaignsTable from '@/components/CampaignsTable';
@@ -11,7 +11,16 @@ import CreateCampaignModal from '@/components/CreateCampaignModal';
 export default function Dashboard() {
   const navigate = useNavigate();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [stats, setStats] = useState({ totalCampaigns: 0, totalLeads: 0, totalCallsMade: 0 });
+  const [stats, setStats] = useState({
+    totalCampaigns: 0,
+    totalLeads: 0,
+    totalCallsMade: 0,
+    totalMeetingsBooked: 0,
+    totalCallbacks: 0,
+    totalInterested: 0,
+    totalNotInterested: 0,
+    totalDoNotCall: 0,
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [isTelnyxConnected, setIsTelnyxConnected] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -20,8 +29,8 @@ export default function Dashboard() {
     try {
       const { data } = await campaignsApi.list();
       setCampaigns(data);
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to load campaigns');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load campaigns');
     } finally {
       setIsLoading(false);
     }
@@ -52,9 +61,7 @@ export default function Dashboard() {
   }, [fetchCampaigns, fetchSettings, fetchStats]);
 
   // Compute stats from real data
-  const totalLeads = stats.totalLeads;
   const totalCalled = stats.totalCallsMade;
-  const activeCampaigns = campaigns.filter(c => c.status === 'active').length;
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -125,10 +132,13 @@ export default function Dashboard() {
             <div className="p-3">
               <div className="space-y-1">
                 {[
-                  { icon: Phone, label: 'Campaigns Total', value: String(stats.totalCampaigns), type: 'campaigns' as const },
-                  { icon: Users, label: 'CRM Leads', value: String(totalLeads), type: 'leads' as const },
-                  { icon: Clock, label: 'Active Campaigns', value: String(activeCampaigns), type: 'active' as const },
-                  { icon: CreditCard, label: 'Completion Rate', value: totalLeads > 0 ? `${Math.round((totalCalled / totalLeads) * 100)}%` : '0%', type: 'completion' as const },
+                  { icon: Users, label: 'Total Leads', value: String(stats.totalLeads), type: 'leads' as const },
+                  { icon: Phone, label: 'Total Calls', value: String(stats.totalCallsMade), type: 'campaigns' as const },
+                  { icon: CalendarCheck, label: 'Total Meetings Booked', value: String(stats.totalMeetingsBooked), type: 'meetings' as const },
+                  { icon: CalendarClock, label: 'Total Call Backs', value: String(stats.totalCallbacks), type: 'callbacks' as const },
+                  { icon: ThumbsUp, label: 'Total Interested', value: String(stats.totalInterested), type: 'active' as const },
+                  { icon: ThumbsDown, label: 'Total Not Interested', value: String(stats.totalNotInterested), type: 'completion' as const },
+                  { icon: Ban, label: 'Total Do Not Call', value: String(stats.totalDoNotCall), type: 'dnc' as const },
                 ].map((stat) => (
                   <div
                     key={stat.label}
@@ -145,12 +155,18 @@ export default function Dashboard() {
                         "bg-emerald-100 dark:bg-emerald-900/30": stat.type === 'leads',
                         "bg-purple-100 dark:bg-purple-900/30": stat.type === 'active',
                         "bg-amber-100 dark:bg-amber-900/30": stat.type === 'completion',
+                        "bg-teal-100 dark:bg-teal-900/30": stat.type === 'meetings',
+                        "bg-cyan-100 dark:bg-cyan-900/30": stat.type === 'callbacks',
+                        "bg-rose-100 dark:bg-rose-900/30": stat.type === 'dnc',
                       })}>
                         <stat.icon className={cn("w-3.5 h-3.5", {
                           "text-blue-600 dark:text-blue-400": stat.type === 'campaigns',
                           "text-emerald-600 dark:text-emerald-400": stat.type === 'leads',
                           "text-purple-600 dark:text-purple-400": stat.type === 'active',
                           "text-amber-600 dark:text-amber-400": stat.type === 'completion',
+                          "text-teal-600 dark:text-teal-400": stat.type === 'meetings',
+                          "text-cyan-600 dark:text-cyan-400": stat.type === 'callbacks',
+                          "text-rose-600 dark:text-rose-400": stat.type === 'dnc',
                         })} />
                       </div>
                       <div>

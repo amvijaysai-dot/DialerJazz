@@ -18,8 +18,7 @@ const MODES = [
     id: "power",
     icon: <Zap className="h-4 w-4" />,
     title: "Power Dialer (Auto-next)",
-    description: "Automatically dial the next lead immediately after hanging up.",
-    disabled: true,
+    description: "Automatically dial the next lead after you hang up and log the outcome.",
   },
   {
     id: "progressive",

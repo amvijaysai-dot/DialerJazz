@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { ApiError } from '../middleware/errorHandler.js';
+import { getDbPool } from '../lib/db.js';
 
 const router = Router();
 
@@ -22,76 +23,51 @@ router.post('/log', requireAuth, async (req: AuthenticatedRequest, res, next) =>
     const userId = req.user?.id;
     if (!userId) throw new ApiError(401, 'Unauthorized', 'auth_required');
 
-    console.log('[calls/log] Received payload:', req.body);
-
     // Validate input with Zod — throws ZodError caught by centralized errorHandler
     const validated = callLogSchema.parse(req.body);
-
-    console.log('[calls/log] Validated data:', validated);
+    const pool = getDbPool();
 
     // Insert call log
-    const { data: logData, error: logError } = await req.db!.database
-      .from('call_logs')
-      .insert({
-        user_id: userId,
-        lead_id: validated.lead_id,
-        campaign_id: validated.campaign_id || null,
-        provider: validated.provider,
-        direction: 'outbound',
-        duration_seconds: validated.duration_seconds,
-        status: validated.status,
-        disposition: validated.disposition || null,
-        notes: validated.notes || null,
-        started_at: new Date().toISOString(),
-        ended_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
+    const { rows } = await pool.query(
+      `INSERT INTO public.call_logs
+        (user_id, lead_id, campaign_id, provider, direction, duration_seconds, status, disposition, notes, started_at, ended_at)
+       VALUES ($1, $2, $3, $4, 'outbound', $5, $6, $7, $8, now(), now())
+       RETURNING *`,
+      [
+        userId,
+        validated.lead_id || null,
+        validated.campaign_id || null,
+        validated.provider,
+        validated.duration_seconds,
+        validated.status,
+        validated.disposition || null,
+        validated.notes || null,
+      ]
+    );
 
-    if (logError) {
-      console.error('[calls/log] Insert error:', logError);
-      throw new ApiError(500, logError.message, 'db_error');
-    }
-
-    console.log('[calls/log] Inserted log:', logData);
+    const logData = rows[0];
 
     // Step 1: Check if this lead was previously uncalled (status is 'new' or 'calling')
     if (validated.lead_id && validated.campaign_id && validated.disposition) {
-      const { data: leadData } = await req.db!.database
-        .from('leads')
-        .select('status')
-        .eq('id', validated.lead_id)
-        .eq('user_id', userId)
-        .single();
+      const { rows: leadRows } = await pool.query(
+        `SELECT status FROM public.leads WHERE id = $1 AND user_id = $2`,
+        [validated.lead_id, userId]
+      );
 
-      const wasUncalled = !leadData?.status || leadData.status === 'new' || leadData.status === 'calling';
+      const wasUncalled = !leadRows[0]?.status || leadRows[0].status === 'new' || leadRows[0].status === 'calling';
 
       // Step 2: Update lead status to the disposition
-      const { error: leadError } = await req.db!.database
-        .from('leads')
-        .update({ status: validated.disposition })
-        .eq('id', validated.lead_id)
-        .eq('user_id', userId);
+      await pool.query(
+        `UPDATE public.leads SET status = $1, updated_at = now() WHERE id = $2 AND user_id = $3`,
+        [validated.disposition, validated.lead_id, userId]
+      );
 
-      if (leadError) {
-        console.error('[calls/log] Lead update error:', leadError);
-      }
-
-      // Step 3: If this was a fresh call, atomically recount the campaign progress
-      // Uses a DB function to avoid read-modify-write race conditions
+      // Step 3: If this was a fresh call, atomically increment the campaign call counter
       if (validated.campaign_id && wasUncalled) {
-        try {
-          const { data: countResult, error: rpcError } = await req.db!.database
-            .rpc('increment_campaign_calls', { p_campaign_id: validated.campaign_id });
-
-          if (rpcError) {
-            console.error('[calls/log] RPC counter error:', rpcError);
-          } else {
-            console.log('[calls/log] Campaign counter synced to:', countResult);
-          }
-        } catch (e) {
-          console.error('[calls/log] Campaign counter update error:', e);
-        }
+        await pool.query(
+          `UPDATE public.campaigns SET leads_called = COALESCE(leads_called, 0) + 1, updated_at = now() WHERE id = $1`,
+          [validated.campaign_id]
+        );
       }
     }
 
