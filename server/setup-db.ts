@@ -111,6 +111,41 @@ async function main() {
     );
   `);
 
+  // Follow-up / disposition enrichment columns on leads (no IST - timezone is source of truth)
+  const leadFollowUpColumns = [
+    `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS follow_up_date date`,
+    `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS follow_up_time time`,
+    `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS callback_date date`,
+    `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS callback_time time`,
+    `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS appointment_date date`,
+    `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS appointment_time time`,
+    `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS priority text DEFAULT 'medium'`,
+    `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS meeting_type text`,
+    `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS meeting_link text`,
+    `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS timezone text`,
+    `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS reminder_enabled boolean DEFAULT true`,
+    `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS completed boolean DEFAULT false`,
+    `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS completed_at timestamptz`,
+    // Demo scheduling columns (no IST - timezone is source of truth)
+    `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS demo_date date`,
+    `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS demo_time time`,
+    `ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS meeting_platform text`,
+  ];
+
+  const addedColumns: string[] = [];
+  for (const col of leadFollowUpColumns) {
+    try {
+      const result = await pool.query(col);
+      if (result.rowCount !== null) {
+        const match = col.match(/ADD COLUMN IF NOT EXISTS (\w+)/);
+        if (match) addedColumns.push(match[1]);
+      }
+    } catch {
+      // Column may already exist or have permission issues - ignore
+    }
+  }
+  console.log(`📦 Lead follow-up columns: ${addedColumns.length > 0 ? addedColumns.join(', ') : 'already present'}`);
+
   // ── call_logs (required by POST /api/calls/log, GET /api/calls, stats) ──
   await pool.query(`
     CREATE TABLE IF NOT EXISTS public.call_logs (

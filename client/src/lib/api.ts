@@ -136,15 +136,39 @@ export const statsApi = {
 };
 
 export const campaignsApi = {
-  list: (params?: PaginationParams) => {
-    const query = new URLSearchParams();
-    if (params?.page) query.set('page', String(params.page));
-    if (params?.per_page) query.set('per_page', String(params.per_page));
-    const qs = query.toString();
-    return apiFetch<Campaign[]>(qs ? `/campaigns?${qs}` : '/campaigns') as Promise<PaginatedResponse<Campaign>>;
-  },
-  
-  get: (id: string) => apiFetch<Campaign>(`/campaigns/${id}`),
+   list: (params?: PaginationParams) => {
+     const query = new URLSearchParams();
+     if (params?.page) query.set('page', String(params.page));
+     if (params?.per_page) query.set('per_page', String(params.per_page));
+     const qs = query.toString();
+     return apiFetch<Campaign[]>(qs ? `/campaigns?${qs}` : '/campaigns') as Promise<PaginatedResponse<Campaign>>;
+   },
+   
+   exportCsv: async (id: string): Promise<Blob> => {
+     let token = cachedToken;
+     if (!token) {
+       try {
+         const { data: sessionData } = await insforge.auth.refreshSession();
+         token = sessionData?.accessToken ?? null;
+         if (token) cachedToken = token;
+       } catch {
+         // refresh failed
+       }
+     }
+     if (!token) throw new Error('Not authenticated. Please sign in again.');
+     
+     const response = await fetch(`${API_BASE}/campaigns/${id}/export`, {
+       method: 'GET',
+       headers: { Authorization: `Bearer ${token}` },
+     });
+     
+     if (!response.ok) {
+       throw new Error(`Export failed: ${response.status}`);
+     }
+     return await response.blob();
+   },
+   
+   get: (id: string) => apiFetch<Campaign>(`/campaigns/${id}`),
   
   create: (payload: { name: string; dialer_mode?: string; provider?: string; caller_number?: string }) =>
     apiFetch<Campaign>('/campaigns', {
@@ -202,6 +226,17 @@ export interface Lead {
   priority: number;
   custom_fields?: Record<string, unknown>;
   created_at: string;
+  updated_at: string;
+  // Demo/Callback fields
+  demo_date?: string;
+  demo_time?: string;
+  callback_date?: string;
+  callback_time?: string;
+  timezone?: string;
+  meeting_platform?: string;
+  meeting_link?: string;
+  follow_up_date?: string;
+  follow_up_time?: string;
 }
 
 export interface LeadsFilterParams extends PaginationParams {
@@ -211,18 +246,20 @@ export interface LeadsFilterParams extends PaginationParams {
 }
 
 export const leadsApi = {
-  listAll: (params?: LeadsFilterParams) => {
-    const query = new URLSearchParams();
-    if (params?.page) query.set('page', String(params.page));
-    if (params?.per_page) query.set('per_page', String(params.per_page));
-    if (params?.search) query.set('search', params.search);
-    if (params?.status) query.set('status', params.status);
-    if (params?.tags) query.set('tags', params.tags);
-    const qs = query.toString();
-    return apiFetch<Lead[]>(qs ? `/leads?${qs}` : '/leads') as Promise<PaginatedResponse<Lead>>;
-  },
+   listAll: (params?: LeadsFilterParams) => {
+     const query = new URLSearchParams();
+     if (params?.page) query.set('page', String(params.page));
+     if (params?.per_page) query.set('per_page', String(params.per_page));
+     if (params?.search) query.set('search', params.search);
+     if (params?.status) query.set('status', params.status);
+     if (params?.tags) query.set('tags', params.tags);
+     const qs = query.toString();
+     return apiFetch<Lead[]>(qs ? `/leads?${qs}` : '/leads') as Promise<PaginatedResponse<Lead>>;
+   },
 
-  listByCampaign: (campaignId: string, params?: { status?: string; limit?: number; offset?: number }) => {
+   getFollowUps: () => apiFetch<Lead[]>('/leads/followups'),
+
+   listByCampaign: (campaignId: string, params?: { status?: string; limit?: number; offset?: number }) => {
     const query = new URLSearchParams();
     if (params?.status) query.set('status', params.status);
     if (params?.limit) query.set('limit', String(params.limit));
@@ -237,10 +274,22 @@ export const leadsApi = {
       body: JSON.stringify({ campaign_id: campaignId, leads }),
     }),
 
-  updateDisposition: (leadId: string, status: string) =>
+  updateDisposition: (leadId: string, status: string, scheduleDetails?: {
+    demo_date?: string;
+    demo_time?: string;
+    callback_date?: string;
+    callback_time?: string;
+    timezone?: string;
+    meeting_platform?: string;
+    meeting_link?: string;
+    notes?: string;
+  }) =>
     apiFetch<Lead>(`/leads/${leadId}/disposition`, {
       method: 'PATCH',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ 
+        status,
+        ...(scheduleDetails || {}),
+      }),
     }),
 
   assignToCampaign: (campaignId: string, leadIds: string[]) =>

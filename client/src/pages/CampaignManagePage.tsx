@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2, Play, Pause, CheckCircle2, Save, RefreshCw, MousePointerClick, Zap, Phone, Server, Smartphone } from 'lucide-react';
+import { ArrowLeft, Loader2, Play, Pause, CheckCircle2, Save, RefreshCw, MousePointerClick, Zap, Phone, Server, Smartphone, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import Select from '@/components/ui/select';
 import { campaignsApi, settingsApi, type Campaign, type UserSettings } from '@/lib/api';
@@ -13,6 +13,7 @@ export default function CampaignManagePage() {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   // Editable config state
   const [dialerMode, setDialerMode] = useState<string>('click');
@@ -54,6 +55,27 @@ export default function CampaignManagePage() {
   }, [id, navigate]);
 
   const isLocked = campaign?.status !== 'draft';
+
+  const handleExportCsv = async () => {
+    if (!id) return;
+    setIsExporting(true);
+    try {
+      const blob = await campaignsApi.exportCsv(id);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${campaign?.name || 'campaign'} - Results - ${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+      toast.success('CSV exported successfully');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to export CSV');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const handleSaveConfig = async () => {
     if (!id || isLocked) return;
@@ -262,21 +284,31 @@ export default function CampaignManagePage() {
              </button>
            )}
 
-           {['active', 'paused'].includes(campaign.status) && (
-             <button
-               onClick={() => {
-                 if (confirm('Are you sure you want to mark this campaign as completed?')) {
-                   handleStatusChange('completed');
-                 }
-               }}
-               className="bg-muted hover:bg-black/5 dark:hover:bg-white/5 border border-border text-foreground px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all"
-               title="Mark as completed"
-             >
-               <CheckCircle2 className="h-4 w-4" /> 
-             </button>
-           )}
-         </div>
-      </div>
+{['active', 'paused'].includes(campaign.status) && (
+              <button
+                onClick={() => {
+                  if (confirm('Are you sure you want to mark this campaign as completed?')) {
+                    handleStatusChange('completed');
+                  }
+                }}
+                className="bg-muted hover:bg-black/5 dark:hover:bg-white/5 border border-border text-foreground px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all"
+                title="Mark as completed"
+              >
+                <CheckCircle2 className="h-4 w-4" /> 
+              </button>
+            )}
+
+            <button
+              onClick={handleExportCsv}
+              disabled={isExporting}
+              className="bg-blue-500 text-white hover:bg-blue-600 px-6 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all disabled:opacity-50"
+              title="Export campaign results to CSV"
+            >
+              {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Export CSV
+            </button>
+          </div>
+       </div>
 
       {/* Configuration Settings */}
       <div className="bg-surface border border-black/5 dark:border-white/5 rounded-[1.5rem] p-6 shadow-sm">

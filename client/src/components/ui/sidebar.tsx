@@ -12,6 +12,7 @@ import {
   PhoneCall,
   Headphones,
   HelpCircle,
+  CalendarDays,
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useState } from "react";
@@ -182,6 +183,15 @@ export function SessionNavBar({ isCollapsed, onToggle }: SessionNavBarProps) {
                     Call Logs
                   </NavItem>
                   <NavItem
+                    href="/follow-ups"
+                    icon={CalendarDays}
+                    active={pathname?.includes("follow-ups")}
+                    collapsed={isCollapsed}
+                    onNavigate={handleNavigation}
+                  >
+                    Follow Ups
+                  </NavItem>
+                  <NavItem
                     href="/connectors"
                     icon={Plug}
                     active={pathname?.includes("connectors")}
@@ -249,6 +259,7 @@ export function SessionNavBar({ isCollapsed, onToggle }: SessionNavBarProps) {
                 <div className="space-y-1">
                   <NavItem href="/leads" icon={Users} active={pathname?.includes("leads")} onNavigate={handleNavigation}>Leads</NavItem>
                   <NavItem href="/call-logs" icon={Clock} active={pathname?.includes("call-logs")} onNavigate={handleNavigation}>Call Logs</NavItem>
+                  <NavItem href="/follow-ups" icon={CalendarDays} active={pathname?.includes("follow-ups")} onNavigate={handleNavigation}>Follow Ups</NavItem>
                   <NavItem href="/connectors" icon={Plug} active={pathname?.includes("connectors")} onNavigate={handleNavigation}>Connectors</NavItem>
                 </div>
               </div>

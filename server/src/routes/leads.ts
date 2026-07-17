@@ -163,29 +163,87 @@ router.post('/bulk', async (req: AuthenticatedRequest, res: Response, next: Next
 // Fetch Leads specifically bound to a campaign via Junction Table
 router.get('/campaign/:campaignId', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    const { limit = '50', offset = '0' } = req.query;
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+    const offset = Number(req.query.offset) || 0;
+    const pool = getDbPool();
 
-    const { data, count, error } = await req.db!
-      .database.from('campaign_leads')
-      .select(`
-        id,
-        leads (*)
-      `, { count: 'exact' })
-      .eq('campaign_id', req.params.campaignId)
+    // Get total count first
+    const { rows: countRows } = await pool.query(
+      `SELECT COUNT(*)::int AS count FROM public.campaign_leads WHERE campaign_id = $1 AND user_id = $2`,
+      [req.params.campaignId, req.user.id]
+    );
+    const total = countRows[0]?.count || 0;
+
+    // Join campaign_leads with leads
+    const { rows } = await pool.query(
+      `SELECT 
+        cl.id AS _campaign_lead_id,
+        l.id,
+        l.user_id,
+        l.first_name,
+        l.last_name,
+        l.company,
+        l.phone,
+        l.email,
+        l.website,
+        l.linkedin_url,
+        l.google_maps_url,
+        l.address,
+        l.city,
+        l.state,
+        l.zip,
+        l.google_rating,
+        l.review_count,
+        l.business_category,
+        l.notes,
+        l.tags,
+        l.status,
+        l.priority,
+        l.custom_fields,
+        l.demo_date,
+        l.demo_time,
+        l.callback_date,
+        l.callback_time,
+        l.timezone,
+        l.meeting_platform,
+        l.meeting_link,
+        l.follow_up_date,
+        l.follow_up_time,
+        l.appointment_date,
+        l.appointment_time,
+        l.reminder_enabled,
+        l.completed,
+        l.completed_at,
+        l.created_at,
+        l.updated_at
+      FROM public.campaign_leads cl
+      JOIN public.leads l ON cl.lead_id = l.id
+      WHERE cl.campaign_id = $1 AND cl.user_id = $2
+      ORDER BY cl.created_at ASC
+      LIMIT $3 OFFSET $4`,
+      [req.params.campaignId, req.user.id, limit, offset]
+    );
+
+    res.json({ data: rows, meta: { total, count: rows.length } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Fetch leads for Follow Ups page
+router.get('/follow-ups', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { data, error } = await req.db!
+      .database.from('leads')
+      .select('*')
       .eq('user_id', req.user.id)
-      .order('created_at', { ascending: true })
-      .range(Number(offset), Number(offset) + Number(limit) - 1);
+      .in('status', ['demo_booked', 'callback'])
+      .not('demo_date', 'is', null)
+      .or('callback_date.not.is.null')
+      .order('updated_at', { ascending: false });
 
     if (error) throw new ApiError(500, error.message, 'db_error');
-
-    // Flatten PostgREST structure for the frontend
-    const flatData = data?.map((row: any) => ({
-      ...row.leads,
-      _campaign_lead_id: row.id,
-      // override tracking status/tags if we intend to track state per campaign later
-    })) || [];
-
-    res.json({ data: flatData, meta: { total: count || 0, count: flatData.length } });
+    res.json({ data: data || [] });
   } catch (error) {
     next(error);
   }
@@ -228,6 +286,7 @@ router.post('/assign', async (req: AuthenticatedRequest, res: Response, next: Ne
   }
 });
 
+// Update disposition (status + optional schedule details)
 router.patch('/:id/disposition', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const dispositionSchema = z.object({
@@ -236,6 +295,7 @@ router.patch('/:id/disposition', async (req: AuthenticatedRequest, res: Response
         'calling',
         'answered',
         'meeting_booked',
+        'demo_booked',
         'callback',
         'not_interested',
         'no_answer',
@@ -243,14 +303,47 @@ router.patch('/:id/disposition', async (req: AuthenticatedRequest, res: Response
         'busy',
         'failed',
         'dnc',
-      ])
+      ]),
+      demo_date: z.string().date().optional().nullable(),
+      demo_time: z.string().optional().nullable(),
+      callback_date: z.string().date().optional().nullable(),
+      callback_time: z.string().optional().nullable(),
+      timezone: z.string().optional().nullable(),
+      meeting_platform: z.string().optional().nullable(),
+      meeting_link: z.string().optional().nullable(),
+      notes: z.string().optional().nullable(),
     });
-    const { status } = dispositionSchema.parse(req.body);
+    const body = dispositionSchema.parse(req.body);
     const pool = getDbPool();
 
     const { rows } = await pool.query(
-      `UPDATE public.leads SET status = $1, updated_at = now() WHERE id = $2 AND user_id = $3 RETURNING *`,
-      [status, req.params.id, req.user.id]
+      `UPDATE public.leads SET
+         status = $1,
+         demo_date = $2,
+         demo_time = $3,
+         callback_date = $4,
+         callback_time = $5,
+         timezone = $6,
+         meeting_platform = $7,
+         meeting_link = $8,
+         notes = $9,
+         completed = false,
+         completed_at = NULL,
+         updated_at = now()
+       WHERE id = $10 AND user_id = $11 RETURNING *`,
+      [
+        body.status,
+        body.demo_date ?? null,
+        body.demo_time ?? null,
+        body.callback_date ?? null,
+        body.callback_time ?? null,
+        body.timezone ?? null,
+        body.meeting_platform ?? null,
+        body.meeting_link ?? null,
+        body.notes ?? null,
+        req.params.id,
+        req.user.id,
+      ]
     );
 
     if (!rows.length) throw new ApiError(404, 'Lead not found', 'not_found');
