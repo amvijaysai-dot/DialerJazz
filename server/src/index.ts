@@ -17,6 +17,8 @@ import callsRouter from './routes/calls.js';
 import telnyxRouter from './routes/telnyx.js';
 import twilioRouter from './routes/twilio.js';
 
+console.log("SERVER ENTRYPOINT:", import.meta.url);
+
 // In dev, load .env from parent dir. In production (Docker), env vars are injected.
 if (process.env.NODE_ENV !== 'production') {
   dotenv.config({ path: '../.env' });
@@ -167,10 +169,10 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 3001;
+const PORT = Number(process.env.PORT) || 3001;
 if (process.env.NODE_ENV !== 'test') {
-  httpServer.listen(PORT, () => {
-    console.log(`🚀 Jazz Caller API running on http://localhost:${PORT}`);
+  httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Jazz Caller API running on port ${PORT} (process.env.PORT=${process.env.PORT})`);
   });
 }
 
