@@ -18,6 +18,22 @@ COPY client/package.json client/package-lock.json ./client/
 RUN cd client && npm ci --legacy-peer-deps
 
 COPY client/ ./client/
+
+# ─── Build-time validation: Fail fast if required VITE_* vars are missing ───
+# These MUST be passed as --build-arg during Docker build
+RUN set -eu; \
+    missing=""; \
+    [ -z "${VITE_INSFORGE_BASE_URL}" ] && missing="${missing} VITE_INSFORGE_BASE_URL"; \
+    [ -z "${VITE_INSFORGE_ANON_KEY}" ] && missing="${missing} VITE_INSFORGE_ANON_KEY"; \
+    [ -z "${VITE_API_URL}" ] && missing="${missing} VITE_API_URL"; \
+    if [ -n "${missing}" ]; then \
+      echo "❌ FATAL: Missing required build-time environment variables:${missing}"; \
+      echo "   Pass them via --build-arg when building the Docker image."; \
+      echo "   Example: docker build --build-arg VITE_INSFORGE_BASE_URL=... --build-arg VITE_INSFORGE_ANON_KEY=... --build-arg VITE_API_URL=/api ."; \
+      exit 1; \
+    fi; \
+    echo "✅ All required VITE_* build-time variables are set"
+
 # Set environment variables for Vite build
 # Vite reads VITE_* env vars at build time and bakes them into the client bundle
 ENV VITE_API_URL="${VITE_API_URL}" \
