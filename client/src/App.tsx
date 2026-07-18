@@ -16,6 +16,7 @@ import CampaignManagePage from './pages/CampaignManagePage';
 import ManualDialerPage from './pages/ManualDialerPage';
 import CallLogsPage from './pages/CallLogsPage';
 import FollowUpsPage from './pages/FollowUpsPage';
+import AuthCallbackPage from './pages/AuthCallbackPage';
 
 const PublicRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, isLoading } = useAuth();
@@ -76,6 +77,7 @@ function App() {
       <Toaster theme="dark" position="bottom-right" />
       <Routes>
         <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
+        <Route path="/auth/callback" element={<AuthCallbackPage />} />
         <Route path="/" element={<Navigate to="/login" replace />} />
 
         {/* All authenticated routes share a single TelnyxProvider + DashboardLayout */}
@@ -85,9 +87,9 @@ function App() {
           <Route path="/campaigns/:id/manage" element={<CampaignManagePage />} />
           <Route path="/campaigns/:id/dial" element={<CampaignDialerPage />} />
           <Route path="/leads" element={<LeadsPage />} />
-<Route path="/call-logs" element={<CallLogsPage />} />
-           <Route path="/follow-ups" element={<FollowUpsPage />} />
-           <Route path="/connectors" element={<ConnectorsPage />} />
+          <Route path="/call-logs" element={<CallLogsPage />} />
+          <Route path="/follow-ups" element={<FollowUpsPage />} />
+          <Route path="/connectors" element={<ConnectorsPage />} />
           <Route path="/dialer" element={<ManualDialerPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>

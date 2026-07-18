@@ -1,7 +1,20 @@
 import { insforge } from './insforge';
 
-// Use environment variable for API URL
-const API_BASE = import.meta.env.VITE_API_URL || '/api';
+// Use environment variable for API URL - no fallback in production
+const API_BASE = import.meta.env.VITE_API_URL;
+
+if (!API_BASE) {
+  throw new Error(
+    'VITE_API_URL is not defined. ' +
+    'This environment variable must be set during the Docker build. ' +
+    'See Dockerfile for required build args.'
+  );
+}
+
+// Ensure API_BASE starts with / for relative paths or is a full URL
+if (!API_BASE.startsWith('/') && !API_BASE.startsWith('http')) {
+  throw new Error('VITE_API_URL must start with / or be a full URL');
+}
 
 /**
  * Token holder — set by AuthContext on login,

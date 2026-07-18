@@ -4,6 +4,7 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 # Accept VITE_ env vars at build time (baked into client bundle)
+# These MUST be passed during Docker build for InsForge auth to work
 ARG VITE_API_URL=/api
 ARG VITE_INSFORGE_BASE_URL
 ARG VITE_INSFORGE_ANON_KEY
@@ -17,6 +18,11 @@ COPY client/package.json client/package-lock.json ./client/
 RUN cd client && npm ci --legacy-peer-deps
 
 COPY client/ ./client/
+# Set environment variables for Vite build
+# Vite reads VITE_* env vars at build time and bakes them into the client bundle
+ENV VITE_API_URL="${VITE_API_URL}" \
+    VITE_INSFORGE_BASE_URL="${VITE_INSFORGE_BASE_URL}" \
+    VITE_INSFORGE_ANON_KEY="${VITE_INSFORGE_ANON_KEY}"
 RUN cd client && npm run build
 
 # 3. Server dependencies are installed in stage 2, no build needed for server when using tsx

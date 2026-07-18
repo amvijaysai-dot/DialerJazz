@@ -22,14 +22,60 @@ if (process.env.NODE_ENV !== 'production') {
   dotenv.config({ path: '../.env' });
 }
 
+// ─── Production Configuration Validation ─────────────────────
+// Fail fast if required environment variables are missing
+function validateProductionConfig() {
+  if (process.env.NODE_ENV === 'production') {
+    const required = [
+      'INSFORGE_URL',
+      'INSFORGE_SERVICE_KEY',
+      'FRONTEND_URL',
+      'VITE_INSFORGE_BASE_URL',
+      'VITE_INSFORGE_ANON_KEY',
+      'VITE_API_URL',
+    ];
+    
+    const missing = required.filter(v => !process.env[v]);
+    
+    if (missing.length > 0) {
+      console.error('❌ FATAL: Missing required environment variables in production:');
+      missing.forEach(v => console.error(`   - ${v}`));
+      console.error('\nSet these in Railway service variables before deploying.');
+      process.exit(1);
+    }
+    
+    // Validate FRONTEND_URL is not localhost
+    const frontendUrl = process.env.FRONTEND_URL;
+    if (frontendUrl?.includes('localhost') || frontendUrl?.includes('127.0.0.1')) {
+      console.error('❌ FATAL: FRONTEND_URL must be a production URL, not localhost');
+      process.exit(1);
+    }
+    
+    // Validate VITE_INSFORGE_BASE_URL is not localhost
+    const insforgeUrl = process.env.VITE_INSFORGE_BASE_URL;
+    if (insforgeUrl?.includes('localhost') || insforgeUrl?.includes('127.0.0.1')) {
+      console.error('❌ FATAL: VITE_INSFORGE_BASE_URL must be a production InsForge URL, not localhost');
+      process.exit(1);
+    }
+    
+    // Validate VITE_API_URL is set
+    const apiUrl = process.env.VITE_API_URL;
+    if (!apiUrl) {
+      console.error('❌ FATAL: VITE_API_URL must be set in production');
+      process.exit(1);
+    }
+  }
+}
+
+validateProductionConfig();
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const allowedOrigins = [
   process.env.FRONTEND_URL,
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'http://localhost:5175'
+  // Only include localhost origins in development
+  ...(process.env.NODE_ENV !== 'production' ? ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'] : [])
 ].filter(Boolean) as string[];
 
 const app = express();

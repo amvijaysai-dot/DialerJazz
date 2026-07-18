@@ -12,10 +12,17 @@ import { createAdminClient, InsForgeClient } from '@insforge/sdk';
  * allows the gateway to route write operations correctly.
  */
 export const getInsforgeClient = (): InsForgeClient => {
-  const baseUrl = process.env.INSFORGE_URL || process.env.VITE_INSFORGE_URL || 'https://hycp776q.us-east.insforge.app';
+  const baseUrl = process.env.INSFORGE_URL;
   
   // Support both INSFORGE_API_KEY and INSFORGE_SERVICE_KEY for backwards compatibility
   const apiKey = process.env.INSFORGE_API_KEY || process.env.INSFORGE_SERVICE_KEY;
+
+  if (!baseUrl) {
+    throw new Error(
+      'INSFORGE_URL is required. ' +
+      'Please set it in your environment configuration.'
+    );
+  }
 
   if (!apiKey) {
     throw new Error(
