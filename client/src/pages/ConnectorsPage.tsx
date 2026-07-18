@@ -1,15 +1,28 @@
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Plug, CheckCircle2, XCircle, ArrowRight, Smartphone } from 'lucide-react';
+import { Plug, CheckCircle2, XCircle, ArrowRight, Smartphone, Phone, Loader2 } from 'lucide-react';
 import { settingsApi } from '@/lib/api';
 import type { UserSettings } from '@/lib/api';
-import Select from '@/components/ui/select';
+
+interface ConnectorStatus {
+  connected: boolean;
+  accountName: string;
+  phoneNumbers: { phone_number: string; friendly_name: string }[];
+  lastTested: string | null;
+}
+
+interface TwilioPhoneNumber {
+  phone_number: string;
+  friendly_name: string;
+}
 
 export default function ConnectorsPage() {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   
-  // Telnyx Modal State
+  const [telnyxStatus, setTelnyxStatus] = useState<ConnectorStatus>({ connected: false, accountName: '', phoneNumbers: [], lastTested: null });
+  const [twilioStatus, setTwilioStatus] = useState<ConnectorStatus>({ connected: false, accountName: '', phoneNumbers: [], lastTested: null });
+  
   const [isTelnyxModalOpen, setIsTelnyxModalOpen] = useState(false);
   const [telnyxKey, setTelnyxKey] = useState('');
   const [sipLogin, setSipLogin] = useState('');
@@ -18,25 +31,17 @@ export default function ConnectorsPage() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [isSavingSip, setIsSavingSip] = useState(false);
 
-  // Twilio Modal State
-  const [isTwilioModalOpen, setIsTwilioModalOpen] = useState(false);
+const [isTwilioModalOpen, setIsTwilioModalOpen] = useState(false);
   const [twilioAccountSid, setTwilioAccountSid] = useState('');
   const [twilioAuthToken, setTwilioAuthToken] = useState('');
   const [twilioApiKey, setTwilioApiKey] = useState('');
   const [twilioApiSecret, setTwilioApiSecret] = useState('');
   const [twilioTwimlAppSid, setTwilioTwimlAppSid] = useState('');
-  const [twilioCallerNumber, setTwilioCallerNumber] = useState('');
+  const [selectedTwilioCallerNumber, setSelectedTwilioCallerNumber] = useState('');
+  const [twilioPhoneNumbers, setTwilioPhoneNumbers] = useState<{ phone_number: string; friendly_name: string }[]>([]);
+  const [isLoadingTwilioNumbers, setIsLoadingTwilioNumbers] = useState(false);
   const [isVerifyingTwilio, setIsVerifyingTwilio] = useState(false);
   const [isSavingTwilio, setIsSavingTwilio] = useState(false);
-
-  // Phone Numbers & Balances State
-  const [telnyxBalance, setTelnyxBalance] = useState<{ balance: string; currency: string } | null>(null);
-  const [telnyxNumbers, setTelnyxNumbers] = useState<{ phone_number: string; friendly_name: string }[]>([]);
-  const [isLoadingTelnyxData, setIsLoadingTelnyxData] = useState(false);
-
-  const [twilioBalance, setTwilioBalance] = useState<{ balance: string; currency: string } | null>(null);
-  const [twilioNumbers, setTwilioNumbers] = useState<{ phone_number: string; friendly_name: string }[]>([]);
-  const [isLoadingTwilioData, setIsLoadingTwilioData] = useState(false);
 
   useEffect(() => {
     fetchSettings();
@@ -44,40 +49,51 @@ export default function ConnectorsPage() {
 
   const fetchSettings = async () => {
     try {
-      const { data } = await settingsApi.get();
-      setSettings(data);
-      // Pre-fill SIP fields if they exist
-      if (data?.telnyx_sip_login) setSipLogin(data.telnyx_sip_login);
-      if (data?.telnyx_sip_password) setSipPassword(data.telnyx_sip_password);
-      if (data?.telnyx_caller_number) setCallerNumber(data.telnyx_caller_number);
-      // Pre-fill Twilio fields if they exist
-      if (data?.twilio_account_sid) setTwilioAccountSid(data.twilio_account_sid);
-      if (data?.twilio_api_key) setTwilioApiKey(data.twilio_api_key);
-      if (data?.twilio_api_secret) setTwilioApiSecret(data.twilio_api_secret);
-      if (data?.twilio_twiml_app_sid) setTwilioTwimlAppSid(data.twilio_twiml_app_sid);
-      if (data?.twilio_caller_number) setTwilioCallerNumber(data.twilio_caller_number);
-
-      // Fetch Provider Data in parallel
-      if (data?.telnyx_api_key) {
-        setIsLoadingTelnyxData(true);
-        Promise.all([settingsApi.getTelnyxBalance(), settingsApi.getTelnyxNumbers()])
-          .then(([balanceRes, numbersRes]) => {
-            if (balanceRes.data) setTelnyxBalance(balanceRes.data);
-            if (numbersRes.data) setTelnyxNumbers(numbersRes.data);
-          })
-          .catch(() => console.error('Failed to fetch Telnyx data'))
-          .finally(() => setIsLoadingTelnyxData(false));
+      const [settingsRes, telnyxConnectorRes, twilioConnectorRes] = await Promise.all([
+        settingsApi.get(),
+        settingsApi.getTelnyxConnector(),
+        settingsApi.getTwilioConnector()
+      ]);
+      
+      setSettings(settingsRes.data);
+      
+      if (telnyxConnectorRes.data) {
+        setTelnyxStatus(telnyxConnectorRes.data);
+        if (settingsRes.data?.telnyx_sip_login) setSipLogin(settingsRes.data.telnyx_sip_login);
+        if (settingsRes.data?.telnyx_sip_password) setSipPassword(settingsRes.data.telnyx_sip_password);
+        if (settingsRes.data?.telnyx_caller_number) setCallerNumber(settingsRes.data.telnyx_caller_number);
       }
-
-      if (data?.twilio_account_sid && data?.twilio_auth_token) {
-        setIsLoadingTwilioData(true);
-        Promise.all([settingsApi.getTwilioBalance(), settingsApi.getTwilioNumbers()])
-          .then(([balanceRes, numbersRes]) => {
-            if (balanceRes.data) setTwilioBalance(balanceRes.data);
-            if (numbersRes.data) setTwilioNumbers(numbersRes.data);
-          })
-          .catch(() => console.error('Failed to fetch Twilio data'))
-          .finally(() => setIsLoadingTwilioData(false));
+      
+      if (twilioConnectorRes.data) {
+        setTwilioStatus(twilioConnectorRes.data);
+        if (settingsRes.data?.twilio_account_sid) setTwilioAccountSid(settingsRes.data.twilio_account_sid);
+        if (settingsRes.data?.twilio_caller_number) {
+          setSelectedTwilioCallerNumber(settingsRes.data.twilio_caller_number);
+        }
+        
+        // Fetch Twilio phone numbers if connected and we have auth token
+        if (twilioConnectorRes.data.connected && settingsRes.data?.twilio_auth_token) {
+          setIsLoadingTwilioNumbers(true);
+          try {
+            const numbersRes = await settingsApi.getTwilioNumbers();
+            if (numbersRes.data) {
+              const numbers = numbersRes.data as TwilioPhoneNumber[];
+              setTwilioPhoneNumbers(numbers);
+              
+              // Auto-select logic
+              if (numbers.length === 1) {
+                setSelectedTwilioCallerNumber(numbers[0].phone_number);
+              } else if (settingsRes.data?.twilio_caller_number) {
+                // Pre-select saved default
+                setSelectedTwilioCallerNumber(settingsRes.data.twilio_caller_number);
+              }
+            }
+          } catch (error) {
+            console.error('Failed to fetch Twilio numbers:', error);
+          } finally {
+            setIsLoadingTwilioNumbers(false);
+          }
+        }
       }
     } catch (error: unknown) {
       toast.error('Failed to load settings');
@@ -87,9 +103,7 @@ export default function ConnectorsPage() {
   };
 
   const hasTelnyxKey = !!settings?.telnyx_api_key;
-  const hasSipCreds = !!settings?.telnyx_sip_login && !!settings?.telnyx_sip_password;
   const hasTwilioKey = !!settings?.twilio_account_sid;
-  const hasTwilioApiCreds = !!settings?.twilio_api_key && !!settings?.twilio_api_secret && !!settings?.twilio_twiml_app_sid;
 
   const handleVerifyTelnyx = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -101,13 +115,13 @@ export default function ConnectorsPage() {
     setIsVerifying(true);
     try {
       const response = await settingsApi.verifyTelnyxKey(telnyxKey);
-      if (response.data.success) {
+      if (response.data?.success) {
         toast.success(response.data.message || 'Telnyx connected successfully!');
         setIsTelnyxModalOpen(false);
         setTelnyxKey('');
-        fetchSettings(); // refresh to show connected state
+        fetchSettings();
       } else {
-        toast.error(response.data.message || 'Invalid Telnyx API Key');
+        toast.error(response.data?.message || 'Invalid Telnyx API Key');
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Verification failed';
@@ -140,7 +154,6 @@ export default function ConnectorsPage() {
     }
   };
 
-  // === Twilio Handlers ===
   const handleVerifyTwilio = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!twilioAccountSid.trim() || !twilioAuthToken.trim()) {
@@ -151,6 +164,28 @@ export default function ConnectorsPage() {
     try {
       const result = await settingsApi.verifyTwilio(twilioAccountSid, twilioAuthToken);
       toast.success(result.data?.message || 'Twilio credentials verified!');
+      
+      // Fetch Twilio phone numbers after successful verification
+      setIsLoadingTwilioNumbers(true);
+      try {
+        const numbersRes = await settingsApi.getTwilioNumbers();
+        if (numbersRes.data) {
+          const numbers = numbersRes.data as TwilioPhoneNumber[];
+          setTwilioPhoneNumbers(numbers);
+          
+          // Auto-select logic
+          if (numbers.length === 1) {
+            setSelectedTwilioCallerNumber(numbers[0].phone_number);
+          } else if (settings?.twilio_caller_number) {
+            setSelectedTwilioCallerNumber(settings.twilio_caller_number);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch Twilio numbers:', error);
+      } finally {
+        setIsLoadingTwilioNumbers(false);
+      }
+      
       fetchSettings();
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : 'Verification failed');
@@ -165,14 +200,34 @@ export default function ConnectorsPage() {
       toast.error('API Key, API Secret, and TwiML App SID are all required');
       return;
     }
+    
+    // Validate that a caller number is selected (required for outbound calls)
+    if (twilioPhoneNumbers.length > 0 && !selectedTwilioCallerNumber) {
+      toast.error('Please select a default caller ID number');
+      return;
+    }
+    
+    // DEBUG: Log the selected value and payload
+    console.log("=== DEBUG: Twilio Save ===");
+    console.log("Selected caller number:", selectedTwilioCallerNumber);
+    console.log("Type:", typeof selectedTwilioCallerNumber);
+    console.log("Is empty string:", selectedTwilioCallerNumber === "");
+    console.log("twilioPhoneNumbers.length:", twilioPhoneNumbers.length);
+    
+    const payload = {
+      twilio_api_key: twilioApiKey,
+      twilio_api_secret: twilioApiSecret,
+      twilio_twiml_app_sid: twilioTwimlAppSid,
+      twilio_caller_number: selectedTwilioCallerNumber || undefined,
+    };
+    
+    console.log("PUT /settings payload:", payload);
+    console.log("JSON body:", JSON.stringify(payload));
+    console.log("============================");
+    
     setIsSavingTwilio(true);
     try {
-      await settingsApi.update({
-        twilio_api_key: twilioApiKey,
-        twilio_api_secret: twilioApiSecret,
-        twilio_twiml_app_sid: twilioTwimlAppSid,
-        twilio_caller_number: twilioCallerNumber || undefined,
-      });
+      await settingsApi.update(payload);
       toast.success('Twilio WebRTC credentials saved!');
       fetchSettings();
     } catch (error: unknown) {
@@ -194,7 +249,7 @@ export default function ConnectorsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight text-foreground mb-2">Connectors</h1>
-        <p className="text-muted-foreground">Manage your external telephony and CRM integrations.</p>
+        <p className="text-muted-foreground">Manage your external telephony integrations.</p>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -205,26 +260,26 @@ export default function ConnectorsPage() {
                Tx
             </div>
             <div className="flex flex-col items-end gap-2">
-              {hasTelnyxKey ? (
+              {telnyxStatus.connected ? (
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-background px-3 py-1 text-xs font-semibold uppercase tracking-wider text-foreground border border-black/10 dark:border-white/10 shadow-sm">
                   <CheckCircle2 className="h-3.5 w-3.5" />
-                  API Connected
+                  Connected
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2.5 py-1 text-xs font-medium text-red-500 border border-red-500/20">
                   <XCircle className="h-3 w-3" />
-                  API Not Connected
+                  Not Connected
                 </span>
               )}
-              {hasSipCreds && (
+              {telnyxStatus.phoneNumbers.length > 0 && (
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground border border-border mt-1">
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  SIP Ready
+                  <Phone className="h-3.5 w-3.5" />
+                  {telnyxStatus.phoneNumbers.length} Number{telnyxStatus.phoneNumbers.length > 1 ? 's' : ''}
                 </span>
               )}
-              {telnyxBalance && (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 px-3 py-1 text-xs font-semibold tracking-wider text-blue-600 border border-blue-500/20 mt-1">
-                  Balance: {telnyxBalance.currency} {telnyxBalance.balance}
+              {telnyxStatus.lastTested && (
+                <span className="text-xs text-muted-foreground mt-1">
+                  Last tested: {new Date(telnyxStatus.lastTested).toLocaleDateString()}
                 </span>
               )}
             </div>
@@ -239,7 +294,7 @@ export default function ConnectorsPage() {
             onClick={() => setIsTelnyxModalOpen(true)}
             className="group flex w-full items-center justify-between rounded-[0.85rem] bg-foreground text-background px-4 py-3.5 text-sm font-medium transition-all hover:opacity-90 shadow-sm"
           >
-            {hasTelnyxKey ? 'Update API Key' : 'Connect Telnyx'}
+            {telnyxStatus.connected ? 'Update Configuration' : 'Connect Telnyx'}
             <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
           </button>
         </div>
@@ -251,10 +306,10 @@ export default function ConnectorsPage() {
                Tw
             </div>
             <div className="flex flex-col items-end gap-2">
-              {hasTwilioKey ? (
+              {twilioStatus.connected ? (
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-background px-3 py-1 text-xs font-semibold uppercase tracking-wider text-foreground border border-black/10 dark:border-white/10 shadow-sm">
                   <CheckCircle2 className="h-3.5 w-3.5" />
-                  API Connected
+                  Connected
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2.5 py-1 text-xs font-medium text-red-500 border border-red-500/20">
@@ -262,15 +317,15 @@ export default function ConnectorsPage() {
                   Not Connected
                 </span>
               )}
-              {hasTwilioApiCreds && (
+              {twilioStatus.phoneNumbers.length > 0 && (
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground border border-border mt-1">
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  WebRTC Ready
+                  <Phone className="h-3.5 w-3.5" />
+                  {twilioStatus.phoneNumbers.length} Number{twilioStatus.phoneNumbers.length > 1 ? 's' : ''}
                 </span>
               )}
-              {twilioBalance && (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 px-3 py-1 text-xs font-semibold tracking-wider text-blue-600 border border-blue-500/20 mt-1">
-                  Balance: {twilioBalance.currency} {twilioBalance.balance}
+              {twilioStatus.lastTested && (
+                <span className="text-xs text-muted-foreground mt-1">
+                  Last tested: {new Date(twilioStatus.lastTested).toLocaleDateString()}
                 </span>
               )}
             </div>
@@ -285,7 +340,7 @@ export default function ConnectorsPage() {
             onClick={() => setIsTwilioModalOpen(true)}
             className="group flex w-full items-center justify-between rounded-[0.85rem] bg-foreground text-background px-4 py-3.5 text-sm font-medium transition-all hover:opacity-90 shadow-sm"
           >
-            {hasTwilioKey ? 'Update Twilio Config' : 'Connect Twilio'}
+            {twilioStatus.connected ? 'Update Configuration' : 'Connect Twilio'}
             <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
           </button>
         </div>
@@ -304,12 +359,12 @@ export default function ConnectorsPage() {
 
           <h3 className="text-xl font-bold text-foreground mb-2">Local SIM</h3>
           <p className="text-sm text-muted-foreground mb-4">
-            Dial via your phone&apos;s native dialer. No WebRTC, no credits, no setup.
+            Dial via your phone's native dialer. No WebRTC, no credits, no setup.
           </p>
 
           <div className="rounded-xl bg-blue-500/10 border border-blue-500/20 p-3 mb-4">
             <p className="text-xs text-blue-600 dark:text-blue-400 leading-relaxed">
-              <span className="font-semibold">How it works:</span> When you start a Local SIM campaign, clicking &ldquo;Call&rdquo; opens your phone&apos;s native dialer with the lead&apos;s number. After the call, return to this tab to log the disposition.
+              <span className="font-semibold">How it works:</span> When you start a Local SIM campaign, clicking "Call" opens your phone's native dialer with the lead's number. After the call, return to this tab to log the disposition.
             </p>
           </div>
 
@@ -330,7 +385,7 @@ export default function ConnectorsPage() {
         </div>
       </div>
 
-      {/* Connection Modal */}
+      {/* Telnyx Connection Modal */}
       {isTelnyxModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
@@ -431,29 +486,14 @@ export default function ConnectorsPage() {
                       <label className="block text-sm font-medium text-foreground text-opacity-90 mb-1">
                         Caller ID Number <span className="text-muted-foreground text-opacity-70 font-normal">(Optional)</span>
                       </label>
-                      {isLoadingTelnyxData ? (
-                        <div className="h-12 w-full animate-pulse rounded-xl bg-muted" />
-                      ) : telnyxNumbers.length > 0 ? (
-                        <Select
-                          defaultValue={telnyxNumbers.find(n => n.phone_number === callerNumber)?.phone_number || telnyxNumbers[0].phone_number}
-                          onChange={(val) => setCallerNumber(val)}
-                          data={telnyxNumbers.map(n => ({
-                            id: n.phone_number,
-                            label: n.friendly_name,
-                            value: n.phone_number,
-                            description: n.phone_number
-                          }))}
-                        />
-                      ) : (
-                        <input
-                          type="text"
-                          id="callerNumber"
-                          placeholder="+1234567890 (No numbers found on account)"
-                          value={callerNumber}
-                          onChange={(e) => setCallerNumber(e.target.value)}
-                          className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground focus:border-foreground focus:outline-none focus:ring-1 focus:ring-foreground transition-all"
-                        />
-                      )}
+                      <input
+                        type="text"
+                        id="callerNumber"
+                        placeholder="+1234567890"
+                        value={callerNumber}
+                        onChange={(e) => setCallerNumber(e.target.value)}
+                        className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground focus:border-foreground focus:outline-none focus:ring-1 focus:ring-foreground transition-all"
+                      />
                     </div>
                   </div>
 
@@ -596,30 +636,44 @@ export default function ConnectorsPage() {
 
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-1">
-                      Caller ID Number <span className="text-muted-foreground font-normal">(Optional)</span>
+                      Default Caller ID Number <span className="text-muted-foreground font-normal">(Required)</span>
                     </label>
-                    {isLoadingTwilioData ? (
-                        <div className="h-12 w-full animate-pulse rounded-xl bg-muted" />
-                      ) : twilioNumbers.length > 0 ? (
-                        <Select
-                          defaultValue={twilioNumbers.find(n => n.phone_number === twilioCallerNumber)?.phone_number || twilioNumbers[0].phone_number}
-                          onChange={(val) => setTwilioCallerNumber(val)}
-                          data={twilioNumbers.map(n => ({
-                            id: n.phone_number,
-                            label: n.friendly_name,
-                            value: n.phone_number,
-                            description: n.phone_number
-                          }))}
-                        />
-                      ) : (
-                    <input
-                      type="text"
-                      id="twilioCallerNum"
-                      placeholder="+1234567890 (No numbers found)"
-                      value={twilioCallerNumber}
-                      onChange={(e) => setTwilioCallerNumber(e.target.value)}
-                      className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground focus:border-foreground focus:outline-none focus:ring-1 focus:ring-foreground transition-all"
-                    />
+                    
+                    {isLoadingTwilioNumbers ? (
+                      <div className="flex items-center gap-3 py-4">
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">Loading verified Twilio numbers...</span>
+                      </div>
+                    ) : twilioPhoneNumbers.length === 0 ? (
+                      <div className="rounded-xl bg-red-500/10 border border-red-500/30 p-4">
+                        <p className="text-sm text-red-400 font-medium">No verified Twilio phone numbers found.</p>
+                        <p className="text-xs text-red-300 mt-1">Add verified numbers in your Twilio Console, then re-verify the connection.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                        {twilioPhoneNumbers.map((number) => (
+                          <label
+                            key={number.phone_number}
+                            className="flex items-center gap-3 rounded-xl border p-3 cursor-pointer transition-all hover:bg-muted/50"
+                          >
+                            <input
+                              type="radio"
+                              name="twilioCallerNumber"
+                              value={number.phone_number}
+                              checked={selectedTwilioCallerNumber === number.phone_number}
+                              onChange={() => setSelectedTwilioCallerNumber(number.phone_number)}
+                              className="h-4 w-4 text-primary border-primary focus:ring-primary focus:ring-2"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-foreground truncate">{number.friendly_name || 'Unnamed'}</p>
+                              <p className="text-sm text-muted-foreground font-mono">{number.phone_number}</p>
+                            </div>
+                            {selectedTwilioCallerNumber === number.phone_number && (
+                              <CheckCircle2 className="h-5 w-5 text-primary" />
+                            )}
+                          </label>
+                        ))}
+                      </div>
                     )}
                   </div>
 
@@ -627,7 +681,13 @@ export default function ConnectorsPage() {
                     <button
                       type="submit"
                       className="flex w-full items-center justify-center gap-2 rounded-[0.85rem] bg-foreground px-6 py-3 text-sm font-medium text-background transition-all hover:opacity-90 disabled:opacity-50 shadow-sm"
-                      disabled={isSavingTwilio || !twilioApiKey.trim() || !twilioApiSecret.trim() || !twilioTwimlAppSid.trim()}
+                      disabled={
+                        isSavingTwilio || 
+                        !twilioApiKey.trim() || 
+                        !twilioApiSecret.trim() || 
+                        !twilioTwimlAppSid.trim() ||
+                        (twilioPhoneNumbers.length > 0 && !selectedTwilioCallerNumber)
+                      }
                     >
                       {isSavingTwilio ? (
                         <div className="h-4 w-4 animate-spin rounded-full border-2 border-background border-t-transparent" />

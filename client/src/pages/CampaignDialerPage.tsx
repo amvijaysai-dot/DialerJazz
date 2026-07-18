@@ -178,7 +178,7 @@ export default function CampaignDialerPage() {
   // Auto-connect to campaign's provider when campaign loads
   useEffect(() => {
     if (campaign?.provider && campaign.provider !== 'local' && voice.activeProvider !== campaign.provider) {
-      voice.connectProvider(campaign.provider);
+      voice.connect(campaign.provider);
     }
   }, [campaign?.provider]);
 
@@ -214,7 +214,7 @@ export default function CampaignDialerPage() {
 
     if (!voice.sipConfigured) return toast.error('Configure a telephony provider in Connectors first.');
     if (voice.connectionStatus !== 'registered') return toast.error('Connecting...');
-    voice.dial(currentLead.phone);
+    voice.makeCall(currentLead.phone, campaign?.caller_number);
   };
 
   const handleHangUp = () => {

@@ -18,7 +18,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // Initialize voice connection once on layout mount
-  const { connectProvider, connectionStatus, activeProvider, primaryCall } = useVoice();
+  const { connect, connectionStatus, activeProvider, primaryCall } = useVoice();
 
   // Only auto-connect a default provider ONCE on first mount. A child page
   // (e.g. the campaign dialer) may later switch to the campaign's own provider
@@ -37,10 +37,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           const { data } = await settingsApi.get();
           if (mounted && !activeProvider) {
              const defaultProv = data?.default_provider || 'telnyx';
-             connectProvider(defaultProv);
+             connect(defaultProv);
           }
         } catch (e) {
-          if (mounted && !activeProvider) connectProvider('telnyx'); // fallback
+          if (mounted && !activeProvider) connect('telnyx'); // fallback
         }
       }
     }

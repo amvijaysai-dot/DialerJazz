@@ -407,6 +407,12 @@ export const settingsApi = {
 
   getTwilioBalance: () =>
     apiFetch<{ balance: string; currency: string }>('/settings/twilio/balance'),
+
+  getTelnyxConnector: () =>
+    apiFetch<{ connected: boolean; accountName: string; phoneNumbers: { phone_number: string; friendly_name: string }[]; lastTested: string | null }>('/settings/connectors/telnyx'),
+
+  getTwilioConnector: () =>
+    apiFetch<{ connected: boolean; accountName: string; phoneNumbers: { phone_number: string; friendly_name: string }[]; lastTested: string | null }>('/settings/connectors/twilio'),
 };
 
 // ============ Telnyx API ============

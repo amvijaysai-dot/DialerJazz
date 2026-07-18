@@ -178,7 +178,7 @@ export default function CampaignManagePage() {
     ? Math.round((campaign.leads_called / campaign.total_leads) * 100) 
     : 0;
 
-  const activeNumbers = provider === 'telnyx' ? telnyxNumbers : twilioNumbers;
+  const activeNumbers = provider === 'local' ? [] : (provider === 'telnyx' ? telnyxNumbers : twilioNumbers);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12">
@@ -349,7 +349,7 @@ export default function CampaignManagePage() {
               title="Provider"
               data={providerData}
               defaultValue={provider}
-              onChange={(val) => setProvider(val as 'telnyx' | 'twilio')}
+              onChange={(val) => setProvider(val as 'telnyx' | 'twilio' | 'local')}
               disabled={isLocked}
             />
           </div>
@@ -376,9 +376,11 @@ export default function CampaignManagePage() {
                 <input
                   type="text"
                   placeholder={
-                    provider === 'telnyx' 
-                      ? (settings?.telnyx_caller_number || '+1234567890 (No numbers found)')
-                      : (settings?.twilio_caller_number || '+1234567890 (No numbers found)')
+                    provider === 'local' 
+                      ? 'N/A (Local SIM uses device dialer)'
+                      : provider === 'telnyx' 
+                        ? (settings?.telnyx_caller_number || '+1234567890 (No numbers found)')
+                        : (settings?.twilio_caller_number || '+1234567890 (No numbers found)')
                   }
                   value={callerNumber}
                   onChange={(e) => setCallerNumber(e.target.value)}

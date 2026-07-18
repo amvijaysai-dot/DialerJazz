@@ -448,15 +448,15 @@ export function TelnyxProvider({ children }: { children: ReactNode }) {
       if (primaryCallRef.current) { setError('A call is already in progress.'); return; }
 
       const resolvedCallerNumber = callerNumber || callerNumberRef.current || '';
-      
+      const formattedCallerNumber = toE164(resolvedCallerNumber);
+      const formattedDestinationNumber = toE164(destinationNumber);
+
       if (!resolvedCallerNumber) {
         console.warn('[TelnyxContext] ⚠️ No callerNumber configured! Telnyx may route using default behaviors.', { callerNumber, callerNumberRef: callerNumberRef.current });
       }
 
-      const formattedCallerNumber = toE164(resolvedCallerNumber);
-
       console.log('[TelnyxContext] dial():', { 
-        destinationNumber, 
+        destinationNumber: formattedDestinationNumber,
         rawCallerNumber: resolvedCallerNumber,
         formattedCallerNumber 
       });
@@ -469,7 +469,7 @@ export function TelnyxProvider({ children }: { children: ReactNode }) {
       setPrimaryCallDuration(0);
 
       client.newCall({
-        destinationNumber,
+        destinationNumber: formattedDestinationNumber,
         callerNumber: formattedCallerNumber,
         callerName: 'Jazz Caller',
       });

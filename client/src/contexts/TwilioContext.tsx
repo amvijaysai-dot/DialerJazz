@@ -16,6 +16,7 @@ import {
 } from 'react';
 import { Device, Call } from '@twilio/voice-sdk';
 import { twilioApi, settingsApi } from '@/lib/api';
+import { toE164, isValidE164 } from '@/lib/utils';
 
 import type { ConnectionStatus, CallState, QualityMetrics } from './TelnyxContext';
 
@@ -307,16 +308,31 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
       if (connectionStatus !== 'registered') { setError('Twilio not registered yet.'); return; }
       if (primaryCallRef.current) { setError('A call is already in progress.'); return; }
 
+      // Normalize caller number: campaign.caller_number > settings > empty
       const resolvedCallerNumber = callerNumber || callerNumberRef.current || '';
+      const formattedCallerNumber = toE164(resolvedCallerNumber);
+
+      // Normalize destination number
+      const formattedDestinationNumber = toE164(destinationNumber);
 
       // Validate caller number is present - Twilio requires a verified callerId for outbound calls
-      if (!resolvedCallerNumber || !/^\+?\d{10,15}$/.test(resolvedCallerNumber.replace(/[\s\-()]/g, ''))) {
-        console.error('[TwilioContext] Invalid or missing caller number:', resolvedCallerNumber);
-        setError('Caller ID not configured. Please set a verified phone number in Connectors > Twilio.');
+      if (!formattedCallerNumber || !isValidE164(formattedCallerNumber)) {
+        console.error('[TwilioContext] Invalid or missing caller number:', { raw: resolvedCallerNumber, formatted: formattedCallerNumber });
+        setError('Caller ID not configured or invalid. Please set a verified phone number in Connectors > Twilio.');
         return;
       }
 
-      console.log('[TwilioContext] dial():', { destinationNumber, resolvedCallerNumber });
+      // Validate destination number
+      if (!formattedDestinationNumber || !isValidE164(formattedDestinationNumber)) {
+        console.error('[TwilioContext] Invalid destination number:', { raw: destinationNumber, formatted: formattedDestinationNumber });
+        setError('Invalid destination phone number. Please enter a valid number.');
+        return;
+      }
+
+      console.log('[TwilioContext] dial():', { 
+        destinationNumber: formattedDestinationNumber, 
+        resolvedCallerNumber: formattedCallerNumber 
+      });
 
       setError(null);
       setSipError(null);
@@ -327,8 +343,8 @@ export function TwilioProvider({ children }: { children: ReactNode }) {
 
       device.connect({
         params: {
-          To: destinationNumber,
-          From: resolvedCallerNumber,
+          To: formattedDestinationNumber,
+          From: formattedCallerNumber,
         },
       }).then((call) => {
         console.log('[TwilioContext] device.connect() succeeded, call parameters:', call.parameters);

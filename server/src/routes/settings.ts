@@ -42,7 +42,14 @@ router.get('/', async (req: AuthenticatedRequest, res: Response, next: NextFunct
 
 router.put('/', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
+    console.log("=== DEBUG: PUT /settings ===");
+    console.log("1. req.body:", JSON.stringify(req.body, null, 2));
+    
     const body = updateSettingsSchema.parse(req.body);
+    console.log("2. Zod parsed body:", JSON.stringify(body, null, 2));
+    console.log("   body.twilio_caller_number:", body.twilio_caller_number);
+    console.log("   body.twilio_caller_number !== undefined:", body.twilio_caller_number !== undefined);
+    
     const pool = getDbPool();
 
     const updatePayload: Record<string, unknown> = {
@@ -63,11 +70,20 @@ router.put('/', async (req: AuthenticatedRequest, res: Response, next: NextFunct
     // General
     if (body.default_provider !== undefined) updatePayload.default_provider = body.default_provider;
 
+    console.log("3. updatePayload:", JSON.stringify(updatePayload, null, 2));
+    console.log("   updatePayload.twilio_caller_number:", updatePayload.twilio_caller_number);
+    console.log("   'twilio_caller_number' in updatePayload:", 'twilio_caller_number' in updatePayload);
+
     const columns = Object.keys(updatePayload);
     const placeholders = columns.map((_, i) => `$${i + 1}`);
     const values = columns.map((c) => updatePayload[c]);
     const updateCols = columns.filter((c) => c !== 'user_id');
     const updateClause = updateCols.map((c) => `${c} = EXCLUDED.${c}`).join(', ');
+
+    console.log("4. SQL columns:", columns);
+    console.log("   SQL values:", values);
+    console.log("   updateClause:", updateClause);
+    console.log("   twilio_caller_number in columns:", columns.includes('twilio_caller_number'));
 
     const { rows } = await pool.query(
       `INSERT INTO public.user_settings (${columns.join(', ')})
@@ -76,6 +92,10 @@ router.put('/', async (req: AuthenticatedRequest, res: Response, next: NextFunct
        RETURNING telnyx_api_key, telnyx_sip_login, telnyx_sip_password, telnyx_caller_number, twilio_account_sid, twilio_auth_token, twilio_api_key, twilio_api_secret, twilio_twiml_app_sid, twilio_caller_number, default_provider, updated_at`,
       values
     );
+
+    console.log("5. RETURNING row:", JSON.stringify(rows[0], null, 2));
+    console.log("   DB twilio_caller_number:", rows[0]?.twilio_caller_number);
+    console.log("============================");
 
     res.json({ data: rows[0] });
   } catch (error) {
@@ -281,6 +301,144 @@ router.get('/twilio/phone-numbers', async (req: AuthenticatedRequest, res: Respo
   } catch (error) {
     console.error('Twilio phone fetch error:', error);
     res.json({ data: [], error: 'fetch_failed' });
+  }
+});
+
+// GET /settings/connectors/telnyx — Get sanitized Telnyx connector status (no secrets exposed)
+router.get('/connectors/telnyx', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { data: settings } = await req.db!
+      .database.from('user_settings')
+      .select('telnyx_api_key, telnyx_caller_number, updated_at')
+      .eq('user_id', req.user.id)
+      .maybeSingle();
+
+    const isConfigured = !!settings?.telnyx_api_key;
+    
+    if (!isConfigured) {
+      return res.json({ 
+        data: { 
+          connected: false, 
+          accountName: '', 
+          phoneNumbers: [],
+          lastTested: null
+        } 
+      });
+    }
+
+    // Fetch numbers and balance to get account info
+    const [numbersRes, balanceRes] = await Promise.allSettled([
+      fetch('https://api.telnyx.com/v2/phone_numbers', {
+        headers: {
+          'Authorization': `Bearer ${settings.telnyx_api_key}`,
+          'Accept': 'application/json'
+        }
+      }),
+      fetch('https://api.telnyx.com/v2/balance', {
+        headers: {
+          'Authorization': `Bearer ${settings.telnyx_api_key}`,
+          'Accept': 'application/json'
+        }
+      })
+    ]);
+
+    const phoneNumbers: { phone_number: string; friendly_name: string }[] = [];
+    if (numbersRes.status === 'fulfilled' && numbersRes.value.ok) {
+      const telnyxData = await numbersRes.value.json();
+      (telnyxData.data || []).forEach((num: any) => {
+        phoneNumbers.push({
+          phone_number: num.phone_number,
+          friendly_name: num.connection_name || num.phone_number,
+        });
+      });
+    }
+
+    const accountName = settings.telnyx_caller_number || 'Telnyx Account';
+
+    res.json({ 
+      data: { 
+        connected: true, 
+        accountName,
+        phoneNumbers,
+        lastTested: settings.updated_at || null
+      } 
+    });
+  } catch (error) {
+    console.error('Telnyx connector status error:', error);
+    res.json({ 
+      data: { 
+        connected: false, 
+        accountName: '', 
+        phoneNumbers: [],
+        lastTested: null
+      } 
+    });
+  }
+});
+
+// GET /settings/connectors/twilio — Get sanitized Twilio connector status (no secrets exposed)
+router.get('/connectors/twilio', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { data: settings } = await req.db!
+      .database.from('user_settings')
+      .select('twilio_account_sid, twilio_auth_token, twilio_caller_number, updated_at')
+      .eq('user_id', req.user.id)
+      .maybeSingle();
+
+    const isConfigured = !!settings?.twilio_account_sid;
+    
+    if (!isConfigured) {
+      return res.json({ 
+        data: { 
+          connected: false, 
+          accountName: '', 
+          phoneNumbers: [],
+          lastTested: null
+        } 
+      });
+    }
+
+    // Fetch numbers to get account info
+    const numbersRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${settings.twilio_account_sid}/IncomingPhoneNumbers.json`, {
+      headers: {
+        'Authorization': 'Basic ' + Buffer.from(`${settings.twilio_account_sid}:${settings.twilio_auth_token}`).toString('base64'),
+      }
+    });
+
+    const phoneNumbers: { phone_number: string; friendly_name: string }[] = [];
+    if (numbersRes.ok) {
+      const twilioData = await numbersRes.json();
+      (twilioData.incoming_phone_numbers || []).forEach((num: any) => {
+        phoneNumbers.push({
+          phone_number: num.phone_number,
+          friendly_name: num.friendly_name,
+        });
+      });
+    }
+
+    // Extract account name from SID (format: ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)
+    const accountName = settings.twilio_account_sid 
+      ? `Twilio Account ${settings.twilio_account_sid.substring(0, 4)}...${settings.twilio_account_sid.substring(settings.twilio_account_sid.length - 4)}`
+      : 'Twilio Account';
+
+    res.json({ 
+      data: { 
+        connected: true, 
+        accountName,
+        phoneNumbers,
+        lastTested: settings.updated_at || null
+      } 
+    });
+  } catch (error) {
+    console.error('Twilio connector status error:', error);
+    res.json({ 
+      data: { 
+        connected: false, 
+        accountName: '', 
+        phoneNumbers: [],
+        lastTested: null
+      } 
+    });
   }
 });
 

@@ -29,7 +29,7 @@ export default function ManualDialerPage() {
     if (!voice.sipConfigured) return toast.error('Configure a telephony provider in Connectors first.');
     if (voice.connectionStatus !== 'registered') return toast.error('Connecting...');
     if (numberInput.trim() === '') return toast.error('Please enter a phone number to call.');
-    voice.dial(numberInput);
+    voice.makeCall(numberInput);
   };
 
   const handleHangUp = async () => {

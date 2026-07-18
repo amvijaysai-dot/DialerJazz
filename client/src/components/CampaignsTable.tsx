@@ -23,12 +23,15 @@ import { useState } from "react";
 import type { Campaign } from "@/lib/api";
 import { useNavigate } from "react-router-dom";
 
+import { Globe, Smartphone } from 'lucide-react';
+
 interface CampaignsTableProps {
   campaigns: Campaign[];
 }
 
 const allColumns = [
   "Campaign",
+  "Provider",
   "Progress",
   "Created At",
   "Status",
@@ -68,6 +71,39 @@ export default function CampaignsTable({ campaigns }: CampaignsTableProps) {
         return 'bg-blue-500/10 text-blue-500 border-blue-500/20 border';
       default:
         return 'bg-muted text-muted-foreground';
+    }
+  };
+
+  const getProviderBadge = (provider: string) => {
+    switch (provider) {
+      case 'telnyx':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-zinc-900 dark:bg-white text-white text-xs font-semibold">
+            <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
+            Telnyx
+          </span>
+        );
+      case 'twilio':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#F22F46] text-white text-xs font-semibold">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#F22F46]/80" />
+            Twilio
+          </span>
+        );
+      case 'local':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 text-xs font-semibold border border-emerald-500/20">
+            <Smartphone className="h-3 w-3" />
+            Local SIM
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-muted text-muted-foreground text-xs font-semibold">
+            <Globe className="h-3 w-3" />
+            {provider}
+          </span>
+        );
     }
   };
 
@@ -113,6 +149,7 @@ export default function CampaignsTable({ campaigns }: CampaignsTableProps) {
         <TableHeader>
           <TableRow className="border-black/5 dark:border-white/5 hover:bg-transparent">
             {visibleColumns.includes("Campaign") && <TableHead className="w-[200px]">Campaign</TableHead>}
+            {visibleColumns.includes("Provider") && <TableHead className="w-[100px]">Provider</TableHead>}
             {visibleColumns.includes("Progress") && <TableHead className="w-[120px]">Progress</TableHead>}
             {visibleColumns.includes("Created At") && <TableHead className="w-[120px] hidden md:table-cell">Created At</TableHead>}
             {visibleColumns.includes("Status") && <TableHead className="w-[100px] hidden sm:table-cell">Status</TableHead>}
@@ -126,14 +163,19 @@ export default function CampaignsTable({ campaigns }: CampaignsTableProps) {
                 ? Math.round((campaign.leads_called / campaign.total_leads) * 100) 
                 : 0;
                 
-              return (
-                 <TableRow key={campaign.id} className="border-black/5 dark:border-white/5 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] cursor-pointer" onClick={() => navigate(`/campaigns/${campaign.id}/manage`)}>
-                  {visibleColumns.includes("Campaign") && (
-                    <TableCell className="font-semibold whitespace-nowrap">
-                      {campaign.name}
-                    </TableCell>
-                  )}
-                  {visibleColumns.includes("Progress") && (
+return (
+                  <TableRow key={campaign.id} className="border-black/5 dark:border-white/5 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] cursor-pointer" onClick={() => navigate(`/campaigns/${campaign.id}/manage`)}>
+                   {visibleColumns.includes("Campaign") && (
+                     <TableCell className="font-semibold whitespace-nowrap">
+                       {campaign.name}
+                     </TableCell>
+                   )}
+                   {visibleColumns.includes("Provider") && (
+                     <TableCell className="whitespace-nowrap">
+                       {getProviderBadge(campaign.provider)}
+                     </TableCell>
+                   )}
+                   {visibleColumns.includes("Progress") && (
                     <TableCell className="whitespace-nowrap tabular-nums font-mono text-sm">
                        <div className="flex flex-col gap-1.5">
                         <div className="flex items-center justify-between text-xs">

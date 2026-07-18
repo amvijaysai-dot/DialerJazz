@@ -19,74 +19,75 @@ import { useTelnyxContext } from './TelnyxContext';
 import { useTwilioContext } from './TwilioContext';
 import type { ConnectionStatus, CallState, QualityMetrics } from './TelnyxContext';
 
-// ── Types ────────────────────────────────────────────────────────────
 export type VoiceProviderType = 'telnyx' | 'twilio';
 
 export interface VoiceContextValue {
-  // Which provider is active
   activeProvider: VoiceProviderType | null;
-
-  // Delegated state
+  
   connectionStatus: ConnectionStatus;
+  reconnectStatus: 'disconnected' | 'reconnecting' | 'connected';
   sipConfigured: boolean;
+  
+  activeCall: any;
   primaryCall: any;
+  callState: CallState;
   primaryCallState: CallState;
+  duration: number;
   primaryCallDuration: number;
+  
   isMuted: boolean;
   isHeld: boolean;
-
-  // Incoming
+  
   incomingCall: any;
   incomingCallerNumber: string;
   incomingCallerName: string;
-
-  // Held
+  
   heldCall: any;
   heldCallDuration: number;
   heldCallerNumber: string;
 
-  // Actions
-  connectProvider: (provider: VoiceProviderType) => Promise<void>;
-  disconnectProvider: () => void;
+  connect: (provider: VoiceProviderType) => Promise<void>;
+  disconnect: () => void;
+  makeCall: (destination: string, callerNumber?: string) => void;
   dial: (destination: string, callerNumber?: string) => void;
   hangup: () => void;
+  mute: () => void;
+  unmute: () => void;
+  hold: () => void;
+  resume: () => void;
+  sendDTMF: (digit: string) => void;
   answerIncoming: () => void;
   rejectIncoming: () => void;
   holdAndAnswer: () => void;
   hangupAndResume: () => void;
-  toggleMute: () => void;
-  toggleHold: () => void;
-  sendDTMF: (digit: string) => void;
-
-  // Navigation
+  
   activeCallRoute: string | null;
   setActiveCallRoute: (route: string | null) => void;
 
-  // Errors & metrics
   error: string | null;
   sipError: string | null;
   qualityMetrics: QualityMetrics | null;
 
-  // Legacy direct access (for gradual migration)
   telnyx: ReturnType<typeof useTelnyxContext>;
   twilio: ReturnType<typeof useTwilioContext>;
+
+  toggleMute: () => void;
+  toggleHold: () => void;
+  connectProvider: (provider: VoiceProviderType) => Promise<void>;
 }
 
 const VoiceCtx = createContext<VoiceContextValue | null>(null);
 
-// ── Provider ─────────────────────────────────────────────────────────
 export function VoiceContextProvider({ children }: { children: ReactNode }) {
   const telnyx = useTelnyxContext();
   const twilio = useTwilioContext();
   const [activeProvider, setActiveProvider] = useState<VoiceProviderType | null>(null);
 
-  // Select the active adapter based on current provider
   const active = activeProvider === 'twilio' ? twilio : telnyx;
 
   const connectProvider = useCallback(async (provider: VoiceProviderType) => {
     console.log(`[VoiceContext] Switching to provider: ${provider}`);
 
-    // Disconnect current provider if switching
     if (activeProvider && activeProvider !== provider) {
       if (activeProvider === 'telnyx') {
         telnyx.disconnect();
@@ -97,7 +98,6 @@ export function VoiceContextProvider({ children }: { children: ReactNode }) {
 
     setActiveProvider(provider);
 
-    // Init the new provider
     if (provider === 'telnyx') {
       await telnyx.initConnection();
     } else {
@@ -105,7 +105,7 @@ export function VoiceContextProvider({ children }: { children: ReactNode }) {
     }
   }, [activeProvider, telnyx, twilio]);
 
-  const disconnectProvider = useCallback(() => {
+  const disconnect = useCallback(() => {
     if (activeProvider === 'telnyx') {
       telnyx.disconnect();
     } else if (activeProvider === 'twilio') {
@@ -114,54 +114,85 @@ export function VoiceContextProvider({ children }: { children: ReactNode }) {
     setActiveProvider(null);
   }, [activeProvider, telnyx, twilio]);
 
-  // Delegate all reads + actions from the active provider
+  const makeCall = useCallback((destination: string, callerNumber?: string) => {
+    active.dial(destination, callerNumber);
+  }, [active]);
+
+  const mute = useCallback(() => {
+    active.toggleMute();
+  }, [active]);
+
+  const unmute = useCallback(() => {
+    active.toggleMute();
+  }, [active]);
+
+  const hold = useCallback(() => {
+    active.toggleHold();
+  }, [active]);
+
+  const resume = useCallback(() => {
+    active.toggleHold();
+  }, [active]);
+
+  const reconnectStatus = active.connectionStatus === 'registered' 
+    ? 'connected' 
+    : active.connectionStatus === 'connecting' 
+      ? 'reconnecting' 
+      : 'disconnected';
+
   const value: VoiceContextValue = {
     activeProvider,
 
-    // State (from active provider)
     connectionStatus: active.connectionStatus,
+    reconnectStatus,
     sipConfigured: active.sipConfigured,
+
+    activeCall: active.primaryCall,
     primaryCall: active.primaryCall,
+    callState: active.primaryCallState,
     primaryCallState: active.primaryCallState,
+    duration: active.primaryCallDuration,
     primaryCallDuration: active.primaryCallDuration,
+
     isMuted: active.isMuted,
     isHeld: active.isHeld,
 
-    // Incoming (from active provider)
     incomingCall: active.incomingCall,
     incomingCallerNumber: active.incomingCallerNumber,
     incomingCallerName: active.incomingCallerName,
 
-    // Held (from active provider)
     heldCall: active.heldCall,
     heldCallDuration: active.heldCallDuration,
     heldCallerNumber: active.heldCallerNumber,
 
-    // Actions (delegated to active)
-    connectProvider,
-    disconnectProvider,
+    connect: connectProvider,
+    disconnect,
+    makeCall,
     dial: active.dial,
     hangup: active.hangup,
+    mute,
+    unmute,
+    hold,
+    resume,
+    sendDTMF: active.sendDTMF,
     answerIncoming: active.answerIncoming,
     rejectIncoming: active.rejectIncoming,
     holdAndAnswer: active.holdAndAnswer,
     hangupAndResume: active.hangupAndResume,
-    toggleMute: active.toggleMute,
-    toggleHold: active.toggleHold,
-    sendDTMF: active.sendDTMF,
 
-    // Navigation
     activeCallRoute: active.activeCallRoute,
     setActiveCallRoute: active.setActiveCallRoute,
 
-    // Errors
     error: active.error,
     sipError: active.sipError,
     qualityMetrics: active.qualityMetrics,
 
-    // Direct access (for gradual migration or special cases)
     telnyx,
     twilio,
+
+    toggleMute: active.toggleMute,
+    toggleHold: active.toggleHold,
+    connectProvider,
   };
 
   return (
@@ -171,7 +202,6 @@ export function VoiceContextProvider({ children }: { children: ReactNode }) {
   );
 }
 
-// ── Hook ─────────────────────────────────────────────────────────────
 export function useVoice(): VoiceContextValue {
   const ctx = useContext(VoiceCtx);
   if (!ctx) {
