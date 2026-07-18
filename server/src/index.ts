@@ -37,11 +37,33 @@ function validateProductionConfig() {
       'VITE_API_URL',
     ];
     
-    const missing = required.filter(v => !process.env[v]);
+    console.log('🔍 Validating required environment variables:');
+    for (const v of required) {
+      const value = process.env[v];
+      if (value === undefined) {
+        console.log(`   ${v}: UNDEFINED`);
+      } else if (value === '') {
+        console.log(`   ${v}: EMPTY STRING`);
+      } else {
+        console.log(`   ${v}: PRESENT (length=${value.length})`);
+      }
+    }
+    
+    const missing = required.filter(v => {
+      const value = process.env[v];
+      return value === undefined || value === '';
+    });
     
     if (missing.length > 0) {
       console.error('❌ FATAL: Missing required environment variables in production:');
-      missing.forEach(v => console.error(`   - ${v}`));
+      missing.forEach(v => {
+        const value = process.env[v];
+        if (value === undefined) {
+          console.error(`   - ${v}: UNDEFINED`);
+        } else {
+          console.error(`   - ${v}: EMPTY STRING`);
+        }
+      });
       console.error('\nSet these in Railway service variables before deploying.');
       process.exit(1);
     }
