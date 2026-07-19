@@ -22,12 +22,13 @@ COPY client/ ./client/
 
 # ─── Build-time validation: Fail fast if required VITE_* vars are missing ───
 # These MUST be passed as --build-arg during Docker build
+# Use ${VAR:-} safe expansion to avoid 'parameter not set' with set -u
 RUN set -eu; \
     missing=""; \
-    [ -z "${VITE_INSFORGE_BASE_URL}" ] && missing="${missing} VITE_INSFORGE_BASE_URL"; \
-    [ -z "${VITE_INSFORGE_ANON_KEY}" ] && missing="${missing} VITE_INSFORGE_ANON_KEY"; \
-    [ -z "${VITE_API_URL}" ] && missing="${missing} VITE_API_URL"; \
-    [ -z "${VITE_FRONTEND_URL}" ] && missing="${missing} VITE_FRONTEND_URL"; \
+    [ -z "${VITE_INSFORGE_BASE_URL:-}" ] && missing="${missing} VITE_INSFORGE_BASE_URL"; \
+    [ -z "${VITE_INSFORGE_ANON_KEY:-}" ] && missing="${missing} VITE_INSFORGE_ANON_KEY"; \
+    [ -z "${VITE_API_URL:-}" ] && missing="${missing} VITE_API_URL"; \
+    [ -z "${VITE_FRONTEND_URL:-}" ] && missing="${missing} VITE_FRONTEND_URL"; \
     if [ -n "${missing}" ]; then \
       echo "❌ FATAL: Missing required build-time environment variables:${missing}"; \
       echo "   Pass them via --build-arg when building the Docker image."; \
