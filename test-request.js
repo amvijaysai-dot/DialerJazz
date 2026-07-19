@@ -12,9 +12,13 @@ console.log('Test token:', testToken);
 
 const data = JSON.stringify({ name: "Test Campaign" });
 
+// Use environment variable for host, default to localhost for local development
+const hostname = process.env.TEST_HOST || 'localhost';
+const port = process.env.TEST_PORT || 3001;
+
 const options = {
-  hostname: 'localhost',
-  port: 3001,
+  hostname,
+  port,
   path: '/api/campaigns',
   method: 'POST',
   headers: {

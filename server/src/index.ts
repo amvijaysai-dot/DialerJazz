@@ -88,6 +88,17 @@ function validateProductionConfig() {
       console.error('❌ FATAL: VITE_API_URL must be set in production');
       process.exit(1);
     }
+    
+    // Validate VITE_FRONTEND_URL is set and not localhost
+    const viteFrontendUrl = process.env.VITE_FRONTEND_URL;
+    if (!viteFrontendUrl) {
+      console.error('❌ FATAL: VITE_FRONTEND_URL must be set in production');
+      process.exit(1);
+    }
+    if (viteFrontendUrl?.includes('localhost') || viteFrontendUrl?.includes('127.0.0.1')) {
+      console.error('❌ FATAL: VITE_FRONTEND_URL must be a production URL, not localhost');
+      process.exit(1);
+    }
   }
 }
 

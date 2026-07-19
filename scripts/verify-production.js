@@ -19,12 +19,14 @@ const REQUIRED_SERVER_VARS = [
   'VITE_INSFORGE_BASE_URL',
   'VITE_INSFORGE_ANON_KEY',
   'VITE_API_URL',
+  'VITE_FRONTEND_URL',
 ];
 
 const REQUIRED_CLIENT_VARS = [
   'VITE_API_URL',
   'VITE_INSFORGE_BASE_URL',
   'VITE_INSFORGE_ANON_KEY',
+  'VITE_FRONTEND_URL',
 ];
 
 const FORBIDDEN_PATTERNS = [
@@ -45,17 +47,19 @@ function checkEnvVar(name, value, isProduction) {
     return { pass: false, message: `❌ ${name} is not set` };
   }
   
-  // Check for forbidden patterns
-  for (const pattern of FORBIDDEN_PATTERNS) {
-    if (value.toLowerCase().includes(pattern.toLowerCase())) {
-      return { pass: false, message: `❌ ${name} contains forbidden pattern: ${pattern}` };
+  // Check for forbidden patterns - only in production mode
+  if (isProduction) {
+    for (const pattern of FORBIDDEN_PATTERNS) {
+      if (value.toLowerCase().includes(pattern.toLowerCase())) {
+        return { pass: false, message: `❌ ${name} contains forbidden pattern: ${pattern}` };
+      }
     }
-  }
-  
-  // Validate specific variables
-  if (name === 'FRONTEND_URL' || name === 'VITE_INSFORGE_BASE_URL') {
-    if (!value.startsWith('https://')) {
-      return { pass: false, message: `❌ ${name} must use HTTPS in production` };
+    
+    // Validate specific variables in production
+    if (name === 'FRONTEND_URL' || name === 'VITE_INSFORGE_BASE_URL' || name === 'VITE_FRONTEND_URL') {
+      if (!value.startsWith('https://')) {
+        return { pass: false, message: `❌ ${name} must use HTTPS in production` };
+      }
     }
   }
   

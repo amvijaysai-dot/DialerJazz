@@ -141,11 +141,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signInWithGoogle = async () => {
-    // Use FRONTEND_URL (or window.location.origin in dev) for the OAuth callback
-    // The callback should go to the frontend application, not the InsForge backend
-    const frontendUrl = import.meta.env.VITE_API_URL.startsWith('http') 
-      ? import.meta.env.VITE_API_URL.replace('/api', '') 
-      : window.location.origin;
+    // Use VITE_FRONTEND_URL for the OAuth callback
+    // This MUST be set at build time and point to the production frontend URL
+    const frontendUrl = import.meta.env.VITE_FRONTEND_URL;
+    
+    if (!frontendUrl) {
+      throw new Error(
+        'VITE_FRONTEND_URL is not defined. ' +
+        'This environment variable must be set during the Docker build. ' +
+        'See Dockerfile for required build args.'
+      );
+    }
+    
     const redirectTo = `${frontendUrl}/auth/callback`;
     const { error } = await insforge.auth.signInWithOAuth({
       provider: 'google',

@@ -8,6 +8,7 @@ WORKDIR /app
 ARG VITE_API_URL=/api
 ARG VITE_INSFORGE_BASE_URL
 ARG VITE_INSFORGE_ANON_KEY
+ARG VITE_FRONTEND_URL
 
 # 1. Install root deps (concurrently)
 COPY package.json package-lock.json ./
@@ -26,10 +27,11 @@ RUN set -eu; \
     [ -z "${VITE_INSFORGE_BASE_URL}" ] && missing="${missing} VITE_INSFORGE_BASE_URL"; \
     [ -z "${VITE_INSFORGE_ANON_KEY}" ] && missing="${missing} VITE_INSFORGE_ANON_KEY"; \
     [ -z "${VITE_API_URL}" ] && missing="${missing} VITE_API_URL"; \
+    [ -z "${VITE_FRONTEND_URL}" ] && missing="${missing} VITE_FRONTEND_URL"; \
     if [ -n "${missing}" ]; then \
       echo "❌ FATAL: Missing required build-time environment variables:${missing}"; \
       echo "   Pass them via --build-arg when building the Docker image."; \
-      echo "   Example: docker build --build-arg VITE_INSFORGE_BASE_URL=... --build-arg VITE_INSFORGE_ANON_KEY=... --build-arg VITE_API_URL=/api ."; \
+      echo "   Example: docker build --build-arg VITE_INSFORGE_BASE_URL=... --build-arg VITE_INSFORGE_ANON_KEY=... --build-arg VITE_API_URL=/api --build-arg VITE_FRONTEND_URL=https://your-app.up.railway.app ."; \
       exit 1; \
     fi; \
     echo "✅ All required VITE_* build-time variables are set"
@@ -38,7 +40,8 @@ RUN set -eu; \
 # Vite reads VITE_* env vars at build time and bakes them into the client bundle
 ENV VITE_API_URL="${VITE_API_URL}" \
     VITE_INSFORGE_BASE_URL="${VITE_INSFORGE_BASE_URL}" \
-    VITE_INSFORGE_ANON_KEY="${VITE_INSFORGE_ANON_KEY}"
+    VITE_INSFORGE_ANON_KEY="${VITE_INSFORGE_ANON_KEY}" \
+    VITE_FRONTEND_URL="${VITE_FRONTEND_URL}"
 RUN cd client && npm run build
 
 # 3. Server dependencies are installed in stage 2, no build needed for server when using tsx
