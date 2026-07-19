@@ -103,14 +103,14 @@ router.post('/voice', express.urlencoded({ extended: false }), (req: Request, re
 
     const twiml = new twilio.twiml.VoiceResponse();
     const to = req.body.To;
-    const from = req.body.From || req.body.Caller;
 
-    console.log(`[Twilio Voice Webhook] Parsed: To=${to}, From=${from}`);
+    // Use the configured Twilio caller ID from environment, NOT req.body.From
+    const callerId = process.env.TWILIO_CALLER_ID || '';
+    console.log(`[Twilio Voice Webhook] Using configured callerId: "${callerId}" (from TWILIO_CALLER_ID env var)`);
 
     // Validate callerId - Twilio requires a verified phone number for outbound calls
-    // The client already validates this before calling device.connect() (TwilioContext line 313)
-    if (!from || !/^\+?\d{10,15}$/.test(from.replace(/[\s\-()]/g, ''))) {
-      console.error('[Twilio Voice Webhook] Missing or invalid callerId (From):', from);
+    if (!callerId || !/^\+?\d{10,15}$/.test(callerId.replace(/[\s\-()]/g, ''))) {
+      console.error('[Twilio Voice Webhook] Missing or invalid TWILIO_CALLER_ID:', callerId);
       twiml.say('Caller ID not configured. Please set a verified phone number in your connector settings.');
       const errorTwiML = twiml.toString();
       console.log('11. ERROR TwiML generated:', errorTwiML);
@@ -121,13 +121,21 @@ router.post('/voice', express.urlencoded({ extended: false }), (req: Request, re
     if (to) {
       // If "To" looks like a phone number, dial it
       if (/^[\d+\-() ]+$/.test(to)) {
-        console.log('[Twilio Voice Webhook] Dialing number:', to, 'with callerId:', from);
-        const dial = twiml.dial({ callerId: from });
+        console.log('[Twilio Voice Webhook] Dialing number:', to, 'with callerId:', callerId);
+        const dial = twiml.dial({
+          callerId: callerId,
+          action: 'https://dialerjazz-production.up.railway.app/api/twilio/webhook',
+          method: 'POST',
+        });
         dial.number(to);
       } else {
         // Could be a client identity — dial as client
-        console.log('[Twilio Voice Webhook] Dialing client:', to, 'with callerId:', from);
-        const dial = twiml.dial({ callerId: from });
+        console.log('[Twilio Voice Webhook] Dialing client:', to, 'with callerId:', callerId);
+        const dial = twiml.dial({
+          callerId: callerId,
+          action: 'https://dialerjazz-production.up.railway.app/api/twilio/webhook',
+          method: 'POST',
+        });
         dial.client(to);
       }
     } else {
@@ -150,11 +158,40 @@ router.post('/voice', express.urlencoded({ extended: false }), (req: Request, re
 });
 
 // ── POST /api/twilio/webhook ───────────────────────────────────────
-// Status callback webhook for call events (optional, for future use)
-router.post('/webhook', express.json(), async (req: Request, res: Response) => {
+// Status callback webhook for Dial verb events.
+// Logs every callback field and all POST parameters on failure.
+router.post('/webhook', express.urlencoded({ extended: false }), async (req: Request, res: Response) => {
   try {
-    const eventType = req.body?.CallStatus;
-    console.log(`[Twilio Webhook] Status: ${eventType}`);
+    const body = req.body || {};
+    const callStatus = body.CallStatus || 'unknown';
+    const dialCallStatus = body.DialCallStatus || 'unknown';
+    const dialCallSid = body.DialCallSid || 'N/A';
+    const dialCallDuration = body.DialCallDuration || 'N/A';
+    const errorCode = body.ErrorCode || 'N/A';
+    const errorMessage = body.ErrorMessage || 'N/A';
+    const callSid = body.CallSid || 'N/A';
+    const parentCallSid = body.ParentCallSid || 'N/A';
+
+    console.log('=== TWILIO DIAL CALLBACK ===');
+    console.log('  CallStatus:', callStatus);
+    console.log('  DialCallStatus:', dialCallStatus);
+    console.log('  DialCallSid:', dialCallSid);
+    console.log('  DialCallDuration:', dialCallDuration);
+    console.log('  ErrorCode:', errorCode);
+    console.log('  ErrorMessage:', errorMessage);
+    console.log('  CallSid:', callSid);
+    console.log('  ParentCallSid:', parentCallSid);
+
+    // If the Dial failed, log every POST parameter received
+    const failedStatuses = ['failed', 'busy', 'no-answer', 'canceled', 'machine'];
+    if (failedStatuses.includes(String(dialCallStatus).toLowerCase())) {
+      console.log('!!! DIAL FAILED — Full POST body:');
+      for (const [key, value] of Object.entries(body)) {
+        console.log(`  ${key}: ${value}`);
+      }
+    }
+
+    console.log('=== END TWILIO DIAL CALLBACK ===');
     res.status(200).send('OK');
   } catch (err) {
     console.error('[Twilio Webhook] Error:', err);
