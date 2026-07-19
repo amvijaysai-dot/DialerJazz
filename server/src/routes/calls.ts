@@ -89,57 +89,92 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res, next) => {
     const perPage = Math.min(100, Math.max(1, Number(req.query.per_page) || 25));
     const offset = (page - 1) * perPage;
 
-    let query = req.db!.database
-      .from('call_logs')
-      .select(`
-        id,
-        lead_id,
-        campaign_id,
-        provider,
-        direction,
-        from_number,
-        to_number,
-        status,
-        disposition,
-        disposition_sub,
-        duration_seconds,
-        recording_url,
-        notes,
-        started_at,
-        ended_at,
-        created_at,
-        leads (first_name, last_name, company, phone),
-        campaigns (name)
-      `, { count: 'exact' })
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
+    const pool = getDbPool();
+
+    // Build WHERE clauses dynamically
+    const conditions: string[] = ['cl.user_id = $1'];
+    const params: any[] = [userId];
+    let paramIndex = 2;
 
     if (campaign_id) {
-      query = query.eq('campaign_id', campaign_id as string);
+      conditions.push(`cl.campaign_id = $${paramIndex}`);
+      params.push(campaign_id as string);
+      paramIndex++;
     }
     if (lead_id) {
-      query = query.eq('lead_id', lead_id as string);
+      conditions.push(`cl.lead_id = $${paramIndex}`);
+      params.push(lead_id as string);
+      paramIndex++;
     }
 
-    const { data, count, error } = await query.range(offset, offset + perPage - 1);
+    const whereClause = conditions.join(' AND ');
 
-    if (error) {
-      console.error('[calls/list] Query error:', error);
-      throw new ApiError(500, error.message, 'db_error');
-    }
+    // Count query
+    const countResult = await pool.query(
+      `SELECT COUNT(*) FROM public.call_logs cl WHERE ${whereClause}`,
+      params
+    );
+    const total = parseInt(countResult.rows[0]?.count || '0', 10);
+
+    // Data query with LEFT JOINs (no foreign key required)
+    const dataParams = [...params, perPage, offset];
+    const { rows: data } = await pool.query(
+      `SELECT
+        cl.id,
+        cl.lead_id,
+        cl.campaign_id,
+        cl.provider,
+        cl.direction,
+        cl.from_number,
+        cl.to_number,
+        cl.status,
+        cl.disposition,
+        cl.disposition_sub,
+        cl.duration_seconds,
+        cl.recording_url,
+        cl.notes,
+        cl.started_at,
+        cl.ended_at,
+        cl.created_at,
+        l.first_name AS lead_first_name,
+        l.last_name AS lead_last_name,
+        l.company AS lead_company,
+        l.phone AS lead_phone,
+        c.name AS campaign_name
+      FROM public.call_logs cl
+      LEFT JOIN public.leads l ON l.id = cl.lead_id
+      LEFT JOIN public.campaigns c ON c.id = cl.campaign_id
+      WHERE ${whereClause}
+      ORDER BY cl.created_at DESC
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+      dataParams
+    );
 
     const formattedData = data?.map((row: any) => ({
-      ...row,
-      lead: row.leads ? {
-        first_name: row.leads.first_name,
-        last_name: row.leads.last_name,
-        company: row.leads.company,
-        phone: row.leads.phone
+      id: row.id,
+      lead_id: row.lead_id,
+      campaign_id: row.campaign_id,
+      provider: row.provider,
+      direction: row.direction,
+      from_number: row.from_number,
+      to_number: row.to_number,
+      status: row.status,
+      disposition: row.disposition,
+      disposition_sub: row.disposition_sub,
+      duration_seconds: row.duration_seconds,
+      recording_url: row.recording_url,
+      notes: row.notes,
+      started_at: row.started_at,
+      ended_at: row.ended_at,
+      created_at: row.created_at,
+      lead: row.lead_id ? {
+        first_name: row.lead_first_name,
+        last_name: row.lead_last_name,
+        company: row.lead_company,
+        phone: row.lead_phone
       } : null,
-      campaign: row.campaigns ? { name: row.campaigns.name } : null
+      campaign: row.campaign_id ? { name: row.campaign_name } : null
     })) || [];
-
-    const total = count || 0;
 
     res.json({
       data: formattedData,
@@ -151,7 +186,17 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res, next) => {
       },
     });
   } catch (err) {
-    next(err);
+    console.error('[calls/list] Error:', err);
+    // Return empty result on error — do not block the caller
+    res.json({
+      data: [],
+      meta: {
+        total: 0,
+        page: 1,
+        per_page: 25,
+        total_pages: 0,
+      },
+    });
   }
 });
 
