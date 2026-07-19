@@ -2,7 +2,7 @@ import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { ApiError } from '../middleware/errorHandler.js';
-import { getDbPool } from '../lib/db.js';
+import { getDbPool, withTransaction } from '../lib/db.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -96,7 +96,6 @@ router.get('/', async (req: AuthenticatedRequest, res: Response, next: NextFunct
 router.post('/bulk', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const body = bulkLeadsSchema.parse(req.body);
-    const pool = getDbPool();
 
     // Deduplicate leads by phone before interacting with DB
     const uniqueLeads = new Map();
@@ -109,52 +108,57 @@ router.post('/bulk', async (req: AuthenticatedRequest, res: Response, next: Next
       user_id: req.user.id
     }));
 
-    // Step 1: Upsert all leads based on User ID & Phone (prevents duplicate contacts globally)
-    const upsertedLeads: any[] = [];
-    for (const lead of leadsToUpsert) {
-      const columns = ['user_id', ...Object.keys(lead).filter(k => k !== 'user_id')];
-      const placeholders = columns.map((_, i) => `$${i + 1}`);
-      const values = columns.map(c => (lead as any)[c]);
-      const updateCols = columns.filter(c => c !== 'user_id' && c !== 'phone');
-      const updateClause = updateCols.map(c => `${c} = EXCLUDED.${c}`).join(', ');
+    // Execute all steps in a single transaction
+    const result = await withTransaction(async (client) => {
+      // Step 1: Upsert all leads based on User ID & Phone (prevents duplicate contacts globally)
+      const upsertedLeads: any[] = [];
+      for (const lead of leadsToUpsert) {
+        const columns = ['user_id', ...Object.keys(lead).filter(k => k !== 'user_id')];
+        const placeholders = columns.map((_, i) => `$${i + 1}`);
+        const values = columns.map(c => (lead as any)[c]);
+        const updateCols = columns.filter(c => c !== 'user_id' && c !== 'phone');
+        const updateClause = updateCols.map(c => `${c} = EXCLUDED.${c}`).join(', ');
 
-      const { rows } = await pool.query(
-        `INSERT INTO public.leads (${columns.join(', ')})
-         VALUES (${placeholders.join(', ')})
-         ON CONFLICT (user_id, phone) DO UPDATE SET ${updateClause}, updated_at = now()
-         RETURNING id`,
-        values
+        const { rows } = await client.query(
+          `INSERT INTO public.leads (${columns.join(', ')})
+           VALUES (${placeholders.join(', ')})
+           ON CONFLICT (user_id, phone) DO UPDATE SET ${updateClause}, updated_at = now()
+           RETURNING id`,
+          values
+        );
+        if (rows.length) upsertedLeads.push({ id: rows[0].id });
+      }
+
+      if (!upsertedLeads.length) {
+        throw new ApiError(500, 'Failed to upsert leads', 'db_error');
+      }
+
+      // Step 2: Map these lead IDs to the Campaign in the junction table
+      for (const lead of upsertedLeads) {
+        await client.query(
+          `INSERT INTO public.campaign_leads (campaign_id, lead_id, user_id)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (campaign_id, lead_id) DO NOTHING`,
+          [body.campaign_id, lead.id, req.user.id]
+        );
+      }
+
+      // Step 3: Update campaign total_leads count
+      const { rows: countRows } = await client.query(
+        `SELECT COUNT(*)::int AS count FROM public.campaign_leads WHERE campaign_id = $1`,
+        [body.campaign_id]
       );
-      if (rows.length) upsertedLeads.push({ id: rows[0].id });
-    }
+      const count = countRows[0]?.count ?? 0;
 
-    if (!upsertedLeads.length) {
-      throw new ApiError(500, 'Failed to upsert leads', 'db_error');
-    }
-
-    // Step 2: Map these lead IDs to the Campaign in the junction table
-    for (const lead of upsertedLeads) {
-      await pool.query(
-        `INSERT INTO public.campaign_leads (campaign_id, lead_id, user_id)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (campaign_id, lead_id) DO NOTHING`,
-        [body.campaign_id, lead.id, req.user.id]
+      await client.query(
+        `UPDATE public.campaigns SET total_leads = $1, updated_at = now() WHERE id = $2`,
+        [count, body.campaign_id]
       );
-    }
 
-    // Step 3: Update campaign total_leads count
-    const { rows: countRows } = await pool.query(
-      `SELECT COUNT(*)::int AS count FROM public.campaign_leads WHERE campaign_id = $1`,
-      [body.campaign_id]
-    );
-    const count = countRows[0]?.count ?? 0;
+      return { upsertedLeads, count };
+    });
 
-    await pool.query(
-      `UPDATE public.campaigns SET total_leads = $1, updated_at = now() WHERE id = $2`,
-      [count, body.campaign_id]
-    );
-
-    res.status(201).json({ data: upsertedLeads, count: upsertedLeads.length });
+    res.status(201).json({ data: result.upsertedLeads, count: result.upsertedLeads.length });
   } catch (error) {
     next(error);
   }
@@ -257,28 +261,30 @@ router.post('/assign', async (req: AuthenticatedRequest, res: Response, next: Ne
       lead_ids: z.array(z.string().uuid()).min(1)
     });
     const body = assignSchema.parse(req.body);
-    const pool = getDbPool();
 
-    for (const lead_id of body.lead_ids) {
-      await pool.query(
-        `INSERT INTO public.campaign_leads (campaign_id, lead_id, user_id)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (campaign_id, lead_id) DO NOTHING`,
-        [body.campaign_id, lead_id, req.user.id]
+    // Execute all steps in a single transaction
+    await withTransaction(async (client) => {
+      for (const lead_id of body.lead_ids) {
+        await client.query(
+          `INSERT INTO public.campaign_leads (campaign_id, lead_id, user_id)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (campaign_id, lead_id) DO NOTHING`,
+          [body.campaign_id, lead_id, req.user.id]
+        );
+      }
+
+      // Update count
+      const { rows: countRows } = await client.query(
+        `SELECT COUNT(*)::int AS count FROM public.campaign_leads WHERE campaign_id = $1`,
+        [body.campaign_id]
       );
-    }
+      const count = countRows[0]?.count ?? 0;
 
-    // Update count
-    const { rows: countRows } = await pool.query(
-      `SELECT COUNT(*)::int AS count FROM public.campaign_leads WHERE campaign_id = $1`,
-      [body.campaign_id]
-    );
-    const count = countRows[0]?.count ?? 0;
-
-    await pool.query(
-      `UPDATE public.campaigns SET total_leads = $1, updated_at = now() WHERE id = $2`,
-      [count, body.campaign_id]
-    );
+      await client.query(
+        `UPDATE public.campaigns SET total_leads = $1, updated_at = now() WHERE id = $2`,
+        [count, body.campaign_id]
+      );
+    });
 
     res.status(201).json({ success: true, count: body.lead_ids.length });
   } catch (error) {

@@ -61,6 +61,9 @@ async function main() {
       UNIQUE (user_id, phone)
     );
     CREATE INDEX IF NOT EXISTS leads_user_id_idx ON public.leads (user_id);
+    -- Composite indexes for common query patterns
+    CREATE INDEX IF NOT EXISTS leads_user_status_idx ON public.leads (user_id, status);
+    CREATE INDEX IF NOT EXISTS leads_user_created_idx ON public.leads (user_id, created_at DESC);
   `);
 
   await pool.query(`
@@ -77,6 +80,9 @@ async function main() {
       updated_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS campaigns_user_id_idx ON public.campaigns (user_id);
+    -- Composite indexes for common query patterns
+    CREATE INDEX IF NOT EXISTS campaigns_user_status_idx ON public.campaigns (user_id, status);
+    CREATE INDEX IF NOT EXISTS campaigns_user_created_idx ON public.campaigns (user_id, created_at DESC);
   `);
 
   await pool.query(`
@@ -90,6 +96,34 @@ async function main() {
     );
     CREATE INDEX IF NOT EXISTS campaign_leads_campaign_id_idx ON public.campaign_leads (campaign_id);
     CREATE INDEX IF NOT EXISTS campaign_leads_lead_id_idx ON public.campaign_leads (lead_id);
+    -- Composite index for campaign + user queries (used in leads.ts and campaigns.ts)
+    CREATE INDEX IF NOT EXISTS campaign_leads_campaign_user_idx ON public.campaign_leads (campaign_id, user_id);
+  `);
+
+  // Add foreign keys from user_id columns to auth.users for referential integrity
+  // These ensure orphaned records are cleaned up if a user is deleted
+  await pool.query(`
+    ALTER TABLE public.leads
+      ADD CONSTRAINT IF NOT EXISTS leads_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES auth.users (id) ON DELETE CASCADE;
+  `);
+
+  await pool.query(`
+    ALTER TABLE public.campaigns
+      ADD CONSTRAINT IF NOT EXISTS campaigns_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES auth.users (id) ON DELETE CASCADE;
+  `);
+
+  await pool.query(`
+    ALTER TABLE public.call_logs
+      ADD CONSTRAINT IF NOT EXISTS call_logs_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES auth.users (id) ON DELETE CASCADE;
+  `);
+
+  await pool.query(`
+    ALTER TABLE public.user_settings
+      ADD CONSTRAINT IF NOT EXISTS user_settings_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES auth.users (id) ON DELETE CASCADE;
   `);
 
   await pool.query(`
@@ -170,6 +204,9 @@ async function main() {
     CREATE INDEX IF NOT EXISTS call_logs_user_id_idx ON public.call_logs (user_id);
     CREATE INDEX IF NOT EXISTS call_logs_user_created_idx ON public.call_logs (user_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS call_logs_campaign_id_idx ON public.call_logs (campaign_id);
+    -- Composite indexes for lead-centric queries (dialer, lead detail, stats)
+    CREATE INDEX IF NOT EXISTS call_logs_lead_created_idx ON public.call_logs (lead_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS call_logs_user_lead_idx ON public.call_logs (user_id, lead_id);
   `);
 
   // ── campaigns.leads_called (progress counter incremented per fresh call) ──

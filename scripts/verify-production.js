@@ -184,49 +184,35 @@ function main() {
   const isProduction = process.env.NODE_ENV === 'production';
   const results = [];
   
-  // Load environment variables from root .env (project root)
-  const projectRoot = process.cwd();
-  const envPath = path.join(projectRoot, '.env');
+  // Load environment variables
+  // In production, ONLY use process.env (Railway injected vars)
+  // In development, also load from .env files for local verification
   let envVars = {};
-  if (fs.existsSync(envPath)) {
-    const content = fs.readFileSync(envPath, 'utf8');
-    // Handle both \n and \r\n line endings
-    const lines = content.split(/\r?\n/);
-    for (const line of lines) {
-      const match = line.match(/^([^#=]+)=(.*)$/);
-      if (match) {
-        envVars[match[1].trim()] = match[2].trim();
+  
+  if (!isProduction) {
+    // Load from .env files for local development verification
+    const projectRoot = process.cwd();
+    const envFiles = [
+      path.join(projectRoot, '.env'),
+      path.join(projectRoot, 'client', '.env'),
+      path.join(projectRoot, 'server', '.env'),
+    ];
+    
+    for (const envPath of envFiles) {
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, 'utf8');
+        const lines = content.split(/\r?\n/);
+        for (const line of lines) {
+          const match = line.match(/^([^#=]+)=(.*)$/);
+          if (match) {
+            envVars[match[1].trim()] = match[2].trim();
+          }
+        }
       }
     }
   }
   
-  // Also load client/.env
-  const clientEnvPath = path.join(projectRoot, 'client', '.env');
-  if (fs.existsSync(clientEnvPath)) {
-    const content = fs.readFileSync(clientEnvPath, 'utf8');
-    const lines = content.split(/\r?\n/);
-    for (const line of lines) {
-      const match = line.match(/^([^#=]+)=(.*)$/);
-      if (match) {
-        envVars[match[1].trim()] = match[2].trim();
-      }
-    }
-  }
-  
-  // Also load server/.env
-  const serverEnvPath = path.join(projectRoot, 'server', '.env');
-  if (fs.existsSync(serverEnvPath)) {
-    const content = fs.readFileSync(serverEnvPath, 'utf8');
-    const lines = content.split(/\r?\n/);
-    for (const line of lines) {
-      const match = line.match(/^([^#=]+)=(.*)$/);
-      if (match) {
-        envVars[match[1].trim()] = match[2].trim();
-      }
-    }
-  }
-  
-  // Also check process.env (for Railway injected vars)
+  // Always check process.env (for Railway injected vars in production, or local overrides in dev)
   for (const key of Object.keys(process.env)) {
     if (!envVars[key]) {
       envVars[key] = process.env[key];

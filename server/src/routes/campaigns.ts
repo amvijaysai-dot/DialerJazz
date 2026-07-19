@@ -2,7 +2,7 @@ import { Router, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { ApiError } from '../middleware/errorHandler.js';
-import { getDbPool } from '../lib/db.js';
+import { getDbPool, withTransaction } from '../lib/db.js';
 
 const router = Router();
 router.use(requireAuth);

@@ -8,6 +8,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { requireAuth, AuthenticatedRequest } from './middleware/auth.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { getDbPool, checkPoolHealth, closePool, getPoolStats } from './lib/db.js';
 
 import settingsRouter from './routes/settings.js';
 import campaignsRouter from './routes/campaigns.js';
@@ -130,9 +131,18 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Health check
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Health check with database pool status
+app.get('/api/health', async (_req, res) => {
+  const dbHealthy = await checkPoolHealth();
+  const poolStats = getPoolStats();
+  res.json({ 
+    status: dbHealthy ? 'ok' : 'degraded', 
+    timestamp: new Date().toISOString(),
+    database: {
+      healthy: dbHealthy,
+      pool: poolStats
+    }
+  });
 });
 
 // Protected Route Example

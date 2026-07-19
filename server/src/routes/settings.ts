@@ -42,14 +42,7 @@ router.get('/', async (req: AuthenticatedRequest, res: Response, next: NextFunct
 
 router.put('/', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    console.log("=== DEBUG: PUT /settings ===");
-    console.log("1. req.body:", JSON.stringify(req.body, null, 2));
-    
     const body = updateSettingsSchema.parse(req.body);
-    console.log("2. Zod parsed body:", JSON.stringify(body, null, 2));
-    console.log("   body.twilio_caller_number:", body.twilio_caller_number);
-    console.log("   body.twilio_caller_number !== undefined:", body.twilio_caller_number !== undefined);
-    
     const pool = getDbPool();
 
     const updatePayload: Record<string, unknown> = {
@@ -70,32 +63,19 @@ router.put('/', async (req: AuthenticatedRequest, res: Response, next: NextFunct
     // General
     if (body.default_provider !== undefined) updatePayload.default_provider = body.default_provider;
 
-    console.log("3. updatePayload:", JSON.stringify(updatePayload, null, 2));
-    console.log("   updatePayload.twilio_caller_number:", updatePayload.twilio_caller_number);
-    console.log("   'twilio_caller_number' in updatePayload:", 'twilio_caller_number' in updatePayload);
-
     const columns = Object.keys(updatePayload);
     const placeholders = columns.map((_, i) => `$${i + 1}`);
     const values = columns.map((c) => updatePayload[c]);
     const updateCols = columns.filter((c) => c !== 'user_id');
     const updateClause = updateCols.map((c) => `${c} = EXCLUDED.${c}`).join(', ');
 
-    console.log("4. SQL columns:", columns);
-    console.log("   SQL values:", values);
-    console.log("   updateClause:", updateClause);
-    console.log("   twilio_caller_number in columns:", columns.includes('twilio_caller_number'));
-
     const { rows } = await pool.query(
       `INSERT INTO public.user_settings (${columns.join(', ')})
        VALUES (${placeholders.join(', ')})
        ON CONFLICT (user_id) DO UPDATE SET ${updateClause}
        RETURNING telnyx_api_key, telnyx_sip_login, telnyx_sip_password, telnyx_caller_number, twilio_account_sid, twilio_auth_token, twilio_api_key, twilio_api_secret, twilio_twiml_app_sid, twilio_caller_number, default_provider, updated_at`,
-      values
+     values
     );
-
-    console.log("5. RETURNING row:", JSON.stringify(rows[0], null, 2));
-    console.log("   DB twilio_caller_number:", rows[0]?.twilio_caller_number);
-    console.log("============================");
 
     res.json({ data: rows[0] });
   } catch (error) {

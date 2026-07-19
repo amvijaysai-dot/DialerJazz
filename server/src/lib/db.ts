@@ -25,9 +25,10 @@ dotenv.config({ path: path.join(__dirname, '../../.env') });
 
 let pool: pg.Pool | null = null;
 
-export const getDbPool = (): pg.Pool => {
-  if (pool) return pool;
-
+/**
+ * Creates and configures the PostgreSQL connection pool with production-ready settings.
+ */
+function createPool(): pg.Pool {
   const host = process.env.DB_HOST;
   const user = process.env.DB_USER;
   const password = process.env.DB_PASSWORD;
@@ -41,15 +42,105 @@ export const getDbPool = (): pg.Pool => {
     );
   }
 
-  pool = new pg.Pool({
+  const newPool = new pg.Pool({
     host,
     port,
     user,
     password,
     database,
-    ssl: { rejectUnauthorized: false },
-    max: 10,
+    // SSL: require valid certificate in production; allow self-signed in dev
+    ssl: process.env.NODE_ENV === 'production'
+      ? { rejectUnauthorized: true }
+      : { rejectUnauthorized: false },
+    // Pool sizing
+    max: Number(process.env.DB_POOL_MAX) || 20,
+    min: Number(process.env.DB_POOL_MIN) || 2,
+    // Timeouts (ms)
+    connectionTimeoutMillis: Number(process.env.DB_CONNECTION_TIMEOUT_MS) || 5000,
+    idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS) || 30000,
+    // Prevent connection leaks
+    maxUses: Number(process.env.DB_MAX_USES) || 7500,
+    // Allow exiting if pool is only thing keeping process alive
+    allowExitOnIdle: true,
   });
 
+  // Global error handler for idle clients
+  newPool.on('error', (err) => {
+    console.error('[pg.Pool] Unexpected error on idle client:', err.message);
+    // Don't crash the process; let individual queries handle their own errors
+  });
+
+  return newPool;
+}
+
+export const getDbPool = (): pg.Pool => {
+  if (pool) return pool;
+  pool = createPool();
   return pool;
 };
+
+/**
+ * Execute a callback within a database transaction.
+ * Automatically handles BEGIN, COMMIT, and ROLLBACK.
+ * 
+ * @param callback - Function receiving the pg.PoolClient, should return a Promise
+ * @returns Promise resolving to the callback's return value
+ */
+export async function withTransaction<T>(
+  callback: (client: pg.PoolClient) => Promise<T>
+): Promise<T> {
+  const pool = getDbPool();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await callback(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Health check for the connection pool.
+ * Returns true if pool is healthy and can execute a simple query.
+ */
+export async function checkPoolHealth(): Promise<boolean> {
+  try {
+    const pool = getDbPool();
+    const result = await pool.query('SELECT 1');
+    return result.rowCount === 1;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Gracefully close all connections in the pool.
+ * Call on application shutdown.
+ */
+export async function closePool(): Promise<void> {
+  if (pool) {
+    await pool.end();
+    pool = null;
+  }
+}
+
+/**
+ * Get pool statistics for monitoring.
+ */
+export function getPoolStats(): {
+  totalCount: number;
+  idleCount: number;
+  waitingCount: number;
+} | null {
+  if (!pool) return null;
+  return {
+    totalCount: pool.totalCount,
+    idleCount: pool.idleCount,
+    waitingCount: pool.waitingCount,
+  };
+}
